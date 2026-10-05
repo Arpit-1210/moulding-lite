@@ -84,10 +84,14 @@ async function loadData() {
 }
 
 async function loadTodayLogs() {
+  await loadLogsForDate(TODAY);
+}
+
+async function loadLogsForDate(date) {
   if (!teams.length) { todayLogs = []; return; }
   const { data } = await supabase.from('production_log').select('*')
     .in('team_id', teams.map(t => t.id))
-    .eq('production_date', TODAY)
+    .eq('production_date', date)
     .order('created_at', { ascending: false });
   todayLogs = data || [];
 }
@@ -172,6 +176,10 @@ async function renderProduction() {
       <div class="today-kpi"><div class="val" id="kpi-entries">0</div><div class="lbl">Entries</div></div>
     </div>
     <div class="prod-panel">
+      <div class="field">
+        <label>📅 Production Date</label>
+        <input type="date" id="prod-date" value="${TODAY}" max="${TODAY}" style="font-size:15px;padding:10px 12px;" />
+      </div>
       <div class="team-tabs" id="team-tabs"></div>
       <div class="field">
         <label>Search Product</label>
@@ -188,7 +196,7 @@ async function renderProduction() {
       <div style="height:12px;"></div>
       <button class="btn-primary" id="btn-save">Save Entry</button>
     </div>
-    <div class="section-head" style="margin-top:4px;"><div class="section-title">Today's Log</div></div>
+    <div class="section-head" style="margin-top:4px;"><div class="section-title" id="log-date-title">Today's Log</div></div>
     <div id="prod-log"><div class="state-msg">No entries yet</div></div>`;
 
   // Team tabs
@@ -229,9 +237,10 @@ async function renderProduction() {
     const btn = document.getElementById('btn-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     const now = new Date();
+    const selectedDate = document.getElementById('prod-date')?.value || TODAY;
     const { data, error } = await supabase.from('production_log').insert([{
       team_id: currentTeamId, product_id: productId, quantity: qty, weight: wt,
-      production_date: TODAY, production_time: now.toTimeString().slice(0, 5),
+      production_date: selectedDate, production_time: now.toTimeString().slice(0, 5),
     }]).select().single();
     btn.disabled = false; btn.textContent = 'Save Entry';
     if (error) { toast('Save failed: ' + error.message, 'error'); return; }
@@ -241,9 +250,21 @@ async function renderProduction() {
     sel.value = '';
     document.getElementById('prod-search').value = '';
     fillProducts();
+    // Reload log for selected date
+    await loadLogsForDate(document.getElementById('prod-date')?.value || TODAY);
     updateKPIs();
     renderTodayLog();
     toast('Saved ✓');
+  });
+
+  // When date changes, reload log
+  document.getElementById('prod-date').addEventListener('change', async (e) => {
+    const d = e.target.value;
+    const title = document.getElementById('log-date-title');
+    if (title) title.textContent = d === TODAY ? "Today's Log" : `Log for ${d}`;
+    await loadLogsForDate(d);
+    updateKPIs();
+    renderTodayLog();
   });
 }
 
