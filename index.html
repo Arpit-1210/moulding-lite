@@ -356,24 +356,41 @@
     @media (max-width: 768px) {
       .mobile-topbar { display: flex; }
       .app-topbar { display: none; }
+
+      /* Sidebar hidden off-screen — only slides in on hamburger tap */
       .sidebar {
-        position: fixed; left: -240px; top: 0; bottom: 0;
-        height: 100vh; transition: left .25s ease; z-index: 40;
+        position: fixed;
+        left: -260px; top: 0; bottom: 0;
+        width: 240px;
+        height: 100vh;
+        transition: left .25s ease;
+        z-index: 40;
+        box-shadow: none;
       }
-      .sidebar.open { left: 0; }
-      .app-content { padding: 14px; }
+      .sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,.18); }
+
+      /* App shell — single column, full width */
+      .app-shell { flex-direction: column; }
+      .app-main { width: 100%; min-width: 0; }
+
+      .app-content { padding: 12px; }
       .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .kpi-value { font-size: 22px; }
       .hero-banner { flex-direction: column; gap: 12px; align-items: flex-start; }
+      .hero-title { font-size: 17px; }
       .inv-hero-kpis { grid-template-columns: repeat(3,1fr); }
       .team-grid, .team-cost-grid { grid-template-columns: 1fr; }
       .field-row { grid-template-columns: 1fr 1fr; }
-      table.dt { min-width: 480px; }
+      .table-wrap { overflow-x: auto; }
+      table.dt { min-width: 420px; }
       .today-kpi .val { font-size: 20px; }
+      .btn-primary { min-height: 50px; font-size: 15px; }
+      .log-item { padding: 10px 12px; }
+      #chart-grid { grid-template-columns: 1fr !important; }
     }
     @media (max-width: 400px) {
       .inv-hero-kpis { grid-template-columns: 1fr 1fr; }
-      .today-bar { grid-template-columns: repeat(3,1fr); }
-      .kpi-value { font-size: 22px; }
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
