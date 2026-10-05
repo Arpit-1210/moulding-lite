@@ -3,7 +3,7 @@ import './styles/owner.css';
 import { renderDashboard } from './pages/owner/dashboard.js';
 import { renderProductionLog } from './pages/owner/productionLog.js';
 import { renderInventory } from './pages/owner/inventory.js';
-import { renderProfitLoss } from './pages/owner/profitLoss.js';
+
 import { renderTeams } from './pages/owner/teams.js';
 import { renderProducts } from './pages/owner/products.js';
 import { renderSettings } from './pages/owner/settings.js';
@@ -28,7 +28,7 @@ const routes = {
   dashboard:       { title:'Dashboard',       sub:'Live moulding overview',     fn: renderDashboard },
   'production-log':{ title:'Production Log',  sub:'All entries by team & date', fn: renderProductionLog },
   inventory:       { title:'Inventory',        sub:'Finished goods stock',       fn: renderInventory },
-  'profit-loss':   { title:'Profit & Loss',    sub:'Revenue and margins',        fn: renderProfitLoss },
+  
   labour:          { title:'Labour',           sub:'Worker rates & management',  fn: renderLabour },
   teams:           { title:'Teams',            sub:'Supervisor teams',            fn: renderTeams },
   products:        { title:'Products',         sub:'Moulding catalogue',          fn: renderProducts },
