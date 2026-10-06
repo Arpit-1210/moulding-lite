@@ -1,48 +1,57 @@
 import { fetchActiveSupervisors } from '../services/supervisors.js';
-import { escapeHtml } from '../utils/dom.js';
 
-/** Screen 1 — Select supervisor. No login, just a name from a predefined, Supabase-backed list. */
 export function initSupervisorSelectView({ onContinue }) {
-  const select = document.getElementById('supervisor-select');
+  const cardsList = document.getElementById('sup-cards-list');
   const continueBtn = document.getElementById('btn-continue-to-teams');
-  const errorEl = document.getElementById('supervisor-error');
 
   let supervisors = [];
+  let selectedId = null;
 
   async function load() {
-    select.innerHTML = '<option value="">Loading supervisors…</option>';
-    errorEl.hidden = true;
+    cardsList.innerHTML = `
+      <div class="skeleton" style="height:72px;border-radius:12px;"></div>
+      <div class="skeleton" style="height:72px;border-radius:12px;margin-top:10px;"></div>
+      <div class="skeleton" style="height:72px;border-radius:12px;margin-top:10px;"></div>`;
     try {
       supervisors = await fetchActiveSupervisors();
-      if (supervisors.length === 0) {
-        select.innerHTML = '<option value="">No active supervisors</option>';
-        errorEl.textContent = 'No active supervisors found. Add one in the supervisors table.';
-        errorEl.hidden = false;
+      if (!supervisors.length) {
+        cardsList.innerHTML = '<div class="state-msg">No supervisors found. Add them in Supabase dashboard.</div>';
         return;
       }
-      select.innerHTML =
-        '<option value="">Select supervisor</option>' +
-        supervisors.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
-    } catch (err) {
-      console.error(err);
-      select.innerHTML = '<option value="">Could not load</option>';
-      errorEl.textContent = 'Could not reach the server. Check your connection and reload.';
-      errorEl.hidden = false;
+      renderCards();
+    } catch(e) {
+      cardsList.innerHTML = '<div class="state-msg" style="color:var(--red);">Could not load supervisors. Check connection.</div>';
     }
   }
 
-  select.addEventListener('change', () => {
-    continueBtn.disabled = !select.value;
-  });
+  function renderCards() {
+    cardsList.innerHTML = supervisors.map(s => `
+      <div class="sup-card ${s.id === selectedId ? 'selected' : ''}" data-id="${s.id}">
+        <div class="sup-avatar">${s.name.charAt(0).toUpperCase()}</div>
+        <div>
+          <div class="sup-card-name">${s.name}</div>
+          <div class="sup-card-sub">Moulding Supervisor</div>
+        </div>
+        <div class="sup-card-check">✓</div>
+      </div>
+    `).join('');
+
+    cardsList.querySelectorAll('.sup-card').forEach(card => {
+      card.addEventListener('click', () => {
+        selectedId = card.dataset.id;
+        continueBtn.disabled = false;
+        renderCards();
+      });
+    });
+  }
 
   continueBtn.addEventListener('click', () => {
-    const supervisor = supervisors.find((s) => String(s.id) === select.value);
-    if (!supervisor) return;
-    onContinue(supervisor);
+    const sup = supervisors.find(s => String(s.id) === String(selectedId));
+    if (sup) onContinue(sup);
   });
 
   function refresh() {
-    select.value = '';
+    selectedId = null;
     continueBtn.disabled = true;
     load();
   }

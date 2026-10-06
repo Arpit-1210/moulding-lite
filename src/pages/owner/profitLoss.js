@@ -1,125 +1,76 @@
-import { fetchAnalytics, subscribeToProductionChanges } from '../../services/analytics.js';
-import { renderKpiRow, formatRupees, formatNumber } from '../../components/kpiRow.js';
-import { initRangeFilter } from '../../components/rangeFilter.js';
-import { flashLivePill } from '../../components/livePill.js';
+import { createClient } from '@supabase/supabase-js';
+const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-export async function render(container) {
-  container.innerHTML = `
-    <div id="range-filter"></div>
-    <div id="kpi-root"></div>
-
-    <div class="panel-grid">
-      <div class="panel">
-        <div class="panel-head"><h2>By product</h2></div>
-        <div id="by-product-root"><p class="state-msg">Loading…</p></div>
-        <p class="hint" style="margin-top: var(--space-3)">Profit here is before wage cost — wage is a team/day cost, not a per-product one.</p>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><h2>By team</h2></div>
-        <div id="by-team-root"><p class="state-msg">Loading…</p></div>
-      </div>
+export async function renderProfitLoss(root) {
+  root.innerHTML=`
+    <div class="range-bar">
+      <button class="range-btn active" data-period="month">This Month</button>
+      <button class="range-btn" data-period="lastmonth">Last Month</button>
+      <button class="range-btn" data-period="all">All Time</button>
     </div>
-  `;
+    <div id="pl-inner"><div class="state-msg">Loading…</div></div>`;
 
-  const kpiRoot = container.querySelector('#kpi-root');
-  const byProductRoot = container.querySelector('#by-product-root');
-  const byTeamRoot = container.querySelector('#by-team-root');
+  async function loadPL(period) {
+    const inner=document.getElementById('pl-inner');
+    inner.innerHTML='<div class="state-msg">Loading…</div>';
+    const TODAY=new Date().toISOString().slice(0,10);
+    let fromStr;
+    if(period==='month') fromStr=TODAY.slice(0,7)+'-01';
+    else if(period==='lastmonth'){ const lm=new Date(); lm.setMonth(lm.getMonth()-1); fromStr=lm.toISOString().slice(0,7)+'-01'; }
+    else fromStr='2020-01-01';
 
-  let currentRange = null;
-  let isFirstLoad = true;
+    const [lr,pr]=await Promise.all([
+      supabase.from('production_log').select('*').gte('production_date',fromStr).lte('production_date',TODAY),
+      supabase.from('products').select('*'),
+    ]);
+    const logs=lr.data||[], prods=pr.data||[];
+    const prodMap=Object.fromEntries(prods.map(p=>[p.id,p]));
+    let revenue=0,cost=0;
+    const byProd={};
+    logs.forEach(l=>{
+      const p=prodMap[l.product_id]; if(!p) return;
+      const qty=Number(l.quantity||0), rev=qty*Number(p.selling_price||0), cst=qty*Number(p.cost_price||0);
+      revenue+=rev; cost+=cst;
+      const n=p.name;
+      if(!byProd[n]) byProd[n]={qty:0,rev:0,cst:0};
+      byProd[n].qty+=qty; byProd[n].rev+=rev; byProd[n].cst+=cst;
+    });
+    const profit=revenue-cost, margin=revenue>0?(profit/revenue*100).toFixed(1):0;
+    const totalUnits=logs.reduce((s,l)=>s+Number(l.quantity||0),0);
+    const hasPrice=prods.some(p=>p.selling_price>0);
+    const rows=Object.entries(byProd).sort((a,b)=>b[1].rev-a[1].rev).map(([n,v])=>`<tr>
+      <td class="bold">${n}</td><td class="num">${v.qty}</td>
+      <td class="num">₹${v.rev.toLocaleString('en-IN')}</td>
+      <td class="num">₹${v.cst.toLocaleString('en-IN')}</td>
+      <td class="num" style="color:${v.rev-v.cst>=0?'var(--green)':'var(--red)'}">₹${(v.rev-v.cst).toLocaleString('en-IN')}</td>
+    </tr>`).join('')||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--ink-dim);">No data</td></tr>';
 
-  function renderProductTable(byProduct) {
-    if (byProduct.length === 0) {
-      byProductRoot.innerHTML = '<p class="state-msg">No production in this range.</p>';
-      return;
-    }
-    byProductRoot.innerHTML = `
-      <table class="data-table">
-        <thead><tr><th>Product</th><th class="num">Units</th><th class="num">Value</th><th class="num">RM cost</th><th class="num">Profit*</th></tr></thead>
-        <tbody>
-          ${byProduct
-            .map(
-              (p) => `
-            <tr>
-              <td>${escapeHtml(p.name)}</td>
-              <td class="num">${formatNumber(p.units)}</td>
-              <td class="num">${formatRupees(p.value)}</td>
-              <td class="num">${formatRupees(p.rmCost)}</td>
-              <td class="num">${formatRupees(p.profit)}</td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>`;
+    inner.innerHTML=`
+      <div class="pl-net" style="background:${profit>=0?'linear-gradient(135deg,#1967D2,#4285f4)':'linear-gradient(135deg,#dc2626,#ef4444)'}">
+        <div class="lbl">Net Profit</div>
+        <div class="amt">₹${Math.abs(profit).toLocaleString('en-IN')}</div>
+        <div class="mgn">${profit>=0?'↑':'↓'} ${margin}% margin · ${totalUnits} units</div>
+      </div>
+      <div class="pl-grid">
+        <div class="pl-section"><h3>Revenue</h3>
+          <div class="pl-row"><span>Units</span><span>${totalUnits}</span></div>
+          <div class="pl-row total"><span>Total</span><span class="green">₹${revenue.toLocaleString('en-IN')}</span></div>
+        </div>
+        <div class="pl-section"><h3>Cost</h3>
+          <div class="pl-row"><span>Material</span><span class="red">₹${cost.toLocaleString('en-IN')}</span></div>
+          <div class="pl-row total"><span>Total</span><span class="red">₹${cost.toLocaleString('en-IN')}</span></div>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Revenue</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${!hasPrice?'<div style="margin-top:10px;font-size:12px;color:var(--ink-dim);text-align:center;">Set selling price in Products page for revenue figures</div>':''}`;
   }
 
-  function renderTeamTable(byTeam) {
-    if (byTeam.length === 0) {
-      byTeamRoot.innerHTML = '<p class="state-msg">No production in this range.</p>';
-      return;
-    }
-    byTeamRoot.innerHTML = `
-      <table class="data-table">
-        <thead><tr><th>Team</th><th>Supervisor</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Profit</th></tr></thead>
-        <tbody>
-          ${byTeam
-            .map(
-              (t) => `
-            <tr>
-              <td>${escapeHtml(t.label)}</td>
-              <td>${escapeHtml(t.supervisorName)}</td>
-              <td class="num">${formatRupees(t.value)}</td>
-              <td class="num">${formatRupees(t.wageCost)}</td>
-              <td class="num">${formatRupees(t.profit)}</td>
-            </tr>`
-            )
-            .join('')}
-        </tbody>
-      </table>`;
-  }
-
-  async function load() {
-    if (!currentRange) return;
-    try {
-      const { summary, byProduct, byTeam } = await fetchAnalytics(currentRange);
-
-      kpiRoot.innerHTML = renderKpiRow([
-        { label: 'Production value', value: formatRupees(summary.value), color: 'green' },
-        { label: 'RM cost', value: formatRupees(summary.rmCost), color: 'orange' },
-        { label: 'Wage cost', value: formatRupees(summary.wageCost), color: 'purple' },
-        {
-          label: 'Profit',
-          value: formatRupees(summary.profit),
-          color: summary.profit >= 0 ? 'green' : 'red',
-        },
-        { label: 'Margin', value: `${formatNumber(summary.margin)}%`, color: 'blue' },
-      ]);
-
-      renderProductTable(byProduct);
-      renderTeamTable(byTeam);
-
-      if (!isFirstLoad) flashLivePill('Updated just now');
-      isFirstLoad = false;
-    } catch (err) {
-      console.error(err);
-      kpiRoot.innerHTML = '<p class="error-text">Could not load profit &amp; loss data.</p>';
-    }
-  }
-
-  initRangeFilter(container.querySelector('#range-filter'), {
-    initial: 'week',
-    onChange: (range) => {
-      currentRange = range;
-      load();
-    },
-  });
-
-  const unsubscribe = subscribeToProductionChanges(load);
-  return unsubscribe;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str ?? '';
-  return div.innerHTML;
+  root.querySelectorAll('.range-btn').forEach(btn=>btn.addEventListener('click',()=>{
+    root.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); loadPL(btn.dataset.period);
+  }));
+  loadPL('month');
 }
