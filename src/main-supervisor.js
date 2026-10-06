@@ -15,8 +15,9 @@ let currentTeamId = null;
 let teams = [], products = [], workers = [], todayLogs = [];
 let currentPage = 'dashboard';
 const TODAY = istToday();
-let invDate = TODAY;
+let SEL = TODAY;            // ONE date for the whole app
 let logDays = 0;
+const fmtD = d => d === TODAY ? 'Today' : new Date(d + 'T12:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
 // ── Toast ──
 function toast(msg, type = 'success') {
@@ -90,7 +91,7 @@ async function loadData() {
 }
 
 async function loadTodayLogs() {
-  await loadLogsForDate(TODAY);
+  await loadLogsForDate(SEL);
 }
 
 async function loadLogsForDate(date) {
@@ -106,12 +107,17 @@ async function loadLogsForDate(date) {
 async function renderDashboard() {
   const el = document.getElementById('dash-content');
   el.innerHTML = '<div class="state-msg">Loading…</div>';
-  const [lr, pr, tr] = await Promise.all([
-    supabase.from('production_log').select('*').eq('production_date', TODAY),
+  const [lr, pr, tr, wr0, rosters0, sums0] = await Promise.all([
+    supabase.from('production_log').select('*').eq('production_date', SEL),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*'),
+    supabase.from('workers').select('name, daily_rate'),
+    fetchRosterRows(supabase),
+    fetchSummaries(supabase),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
+  const dayTeamDays = buildTeamDays(logs, allTeams, wr0.data || [], rosters0, sums0);
+  const dayTot = sumDays(dayTeamDays);
   const permanent = (await loadCostData(supabase)).overall;
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
   const totalUnits = logs.reduce((s, l) => s + Number(l.quantity || 0), 0);
@@ -130,6 +136,8 @@ async function renderDashboard() {
     const tUnits = tLogs.reduce((s, l) => s + Number(l.quantity || 0), 0);
     const tWt = tLogs.reduce((s, l) => s + Number(l.weight || 0), 0);
     const active = tUnits > 0;
+    const tdRow = dayTeamDays.find(r => r.team === (t.name || 'Team ' + t.team_number));
+    const tCpk = tdRow && tdRow.weight > 0 ? '₹' + tdRow.cpk.toFixed(2) : '—';
     return `<div class="team-card" style="border-left-color:${active ? '#16a34a' : '#e4e7ec'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <h3>${t.name || 'Team ' + t.team_number}</h3>
@@ -138,39 +146,42 @@ async function renderDashboard() {
       <div class="tstat"><span class="l">Units</span><span class="v" style="color:#1967D2">${tUnits}</span></div>
       <div class="tstat"><span class="l">Weight</span><span class="v">${tWt.toFixed(1)} kg</span></div>
       <div class="tstat"><span class="l">Entries</span><span class="v">${tLogs.length}</span></div>
+      <div class="tstat"><span class="l">Cost per kg</span><span class="v" style="color:#dc2626">${tCpk}</span></div>
     </div>`;
   }).join('') || '<div class="state-msg">No teams yet</div>';
 
   const prodRows = Object.entries(byProd).sort((a, b) => b[1].qty - a[1].qty)
     .map(([n, v]) => `<tr><td class="bold">${n}</td><td class="num">${v.qty}</td><td class="num">${v.wt.toFixed(1)} kg</td></tr>`)
-    .join('') || '<tr><td colspan="3" style="text-align:center;color:#667085;padding:20px;">No production today</td></tr>';
+    .join('') || '<tr><td colspan="3" style="text-align:center;color:#667085;padding:20px;">No production on this date</td></tr>';
 
   el.innerHTML = `
     <div class="hero-banner">
       <div>
         <div class="hero-title">Good ${new Date().getHours() < 12 ? 'Morning' : 'Afternoon'} 👋</div>
-        <div class="hero-sub">Moulding · ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}</div>
+        <div class="hero-sub">Moulding · ${fmtD(SEL)}</div>
       </div>
       <button class="hero-action" onclick="showPage('production')">Log Production →</button>
     </div>
     <div class="kpi-grid">
-      <div class="kpi-card" style="--ac:#1967D2"><div class="kpi-icon">🏭</div><div class="kpi-label">Units Today</div><div class="kpi-value">${totalUnits}</div><div class="kpi-sub">${logs.length} entries</div></div>
-      <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight (kg)</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">produced today</div></div>
+      <div class="kpi-card" style="--ac:#1967D2"><div class="kpi-icon">🏭</div><div class="kpi-label">Units · ${fmtD(SEL)}</div><div class="kpi-value">${totalUnits}</div><div class="kpi-sub">${logs.length} entries</div></div>
+      <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight (kg)</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">produced</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${allTeams.length} total</div></div>
-      <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made today</div></div>
+      <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🏭</div><div class="kpi-label">Factory Cost per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.cpk > 0 ? '₹' + dayTot.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">labour ₹${Math.round(dayTot.wage).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
       <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Cost per kg</div><div class="kpi-value">${permanent.cpk > 0 ? '₹' + permanent.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ₹${Math.round(permanent.wage).toLocaleString('en-IN')} ÷ ${permanent.weight.toFixed(0)} kg</div></div>
     </div>
-    <div class="section-head"><div><div class="section-title">Teams — Today</div></div></div>
+    <div class="section-head"><div><div class="section-title">Teams — ${fmtD(SEL)}</div></div></div>
     <div class="team-grid">${teamCards}</div>
-    <div class="section-head"><div class="section-title">Today by Product</div></div>
+    <div class="section-head"><div class="section-title">${fmtD(SEL)} by Product</div></div>
     <div class="table-wrap"><table class="dt">
       <thead><tr><th>Product</th><th class="num">Units</th><th class="num">Weight</th></tr></thead>
       <tbody>${prodRows}</tbody>
     </table></div>`;
 
-  supabase.channel(`dash-${Date.now()}`)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_log', filter: `production_date=eq.${TODAY}` },
-      () => renderDashboard())
+  if (window._dashCh) supabase.removeChannel(window._dashCh);
+  window._dashCh = supabase.channel(`dash-${Date.now()}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_log', filter: `production_date=eq.${SEL}` },
+      () => { if (currentPage === 'dashboard') renderDashboard(); })
     .subscribe();
 }
 
@@ -184,10 +195,7 @@ async function renderProduction() {
       <div class="today-kpi"><div class="val" id="kpi-entries">0</div><div class="lbl">Entries</div></div>
     </div>
     <div class="prod-panel">
-      <div class="field">
-        <label>📅 Production Date</label>
-        <input type="date" id="prod-date" value="${TODAY}" max="${TODAY}" style="font-size:15px;padding:10px 12px;" />
-      </div>
+      <div style="font-size:13px;font-weight:600;color:#1967D2;margin-bottom:10px;">📅 Logging for ${fmtD(SEL)} <span style="font-weight:400;color:#667085;">(change the date at the top)</span></div>
       <div class="team-tabs" id="team-tabs"></div>
       <div id="roster-note" style="font-size:12px;color:#667085;margin:-2px 0 12px;"></div>
       <div class="field">
@@ -224,7 +232,7 @@ async function renderProduction() {
 
   let prodRosters = await fetchRosterRows(supabase);
   function updateRosterNote() {
-    const d = document.getElementById('prod-date')?.value || TODAY;
+    const d = SEL;
     const t = teams.find(x => x.id === currentTeamId);
     const m = t ? membersOn(rosterIndex(prodRosters), t.id, d) : [];
     const note = document.getElementById('roster-note');
@@ -257,7 +265,7 @@ async function renderProduction() {
     if (!productId) { toast('Select a product', 'error'); return; }
     if (!qty || qty <= 0) { toast('Enter quantity', 'error'); return; }
     if (!wt || wt <= 0) { toast('Enter weight', 'error'); return; }
-    const dateForRoster = document.getElementById('prod-date')?.value || TODAY;
+    const dateForRoster = SEL;
     const idx = rosterIndex(prodRosters);
     const dayMembers = membersOn(idx, currentTeamId, dateForRoster);
     if (!dayMembers.length) { toast('Set this team’s workers for this date in Teams first', 'error'); return; }
@@ -268,7 +276,7 @@ async function renderProduction() {
     const btn = document.getElementById('btn-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     const now = new Date();
-    const selectedDate = document.getElementById('prod-date')?.value || TODAY;
+    const selectedDate = SEL;
     const { data, error } = await supabase.from('production_log').insert([{
       team_id: currentTeamId, product_id: productId, quantity: qty, weight: wt,
       production_date: selectedDate, production_time: now.toTimeString().slice(0, 5),
@@ -283,22 +291,14 @@ async function renderProduction() {
     document.getElementById('prod-search').value = '';
     fillProducts();
     // Reload log for selected date
-    await loadLogsForDate(document.getElementById('prod-date')?.value || TODAY);
+    await loadLogsForDate(SEL);
     updateKPIs();
     renderTodayLog();
     toast('Saved ✓');
   });
 
-  // When date changes, reload log
-  document.getElementById('prod-date').addEventListener('change', async (e) => {
-    const d = e.target.value;
-    updateRosterNote();
-    const title = document.getElementById('log-date-title');
-    if (title) title.textContent = d === TODAY ? "Today's Log" : `Log for ${d}`;
-    await loadLogsForDate(d);
-    updateKPIs();
-    renderTodayLog();
-  });
+  const title = document.getElementById('log-date-title');
+  if (title) title.textContent = SEL === TODAY ? "Today's Log" : `Log for ${fmtD(SEL)}`;
 }
 
 function updateKPIs() {
@@ -337,7 +337,6 @@ function renderTodayLog() {
 
 // ── Teams (fixed per day) ──
 let rosterRows = [];
-let rosterDate = TODAY;
 
 async function renderTeams() {
   const el = document.getElementById('teams-content');
@@ -346,11 +345,11 @@ async function renderTeams() {
   teams = data || [];
   rosterRows = await fetchRosterRows(supabase);
 
-  const membersOf = t => membersOn(rosterIndex(rosterRows), t.id, rosterDate);
+  const membersOf = t => membersOn(rosterIndex(rosterRows), t.id, SEL);
 
   async function saveMembers(t, members) {
-    await saveRoster(supabase, t.id, rosterDate, members);
-    rosterRows = withRoster(rosterRows, t.id, rosterDate, members);
+    await saveRoster(supabase, t.id, SEL, members);
+    rosterRows = withRoster(rosterRows, t.id, SEL, members);
   }
 
   async function addTeam() {
@@ -383,7 +382,7 @@ async function renderTeams() {
     if (!w) { toast('Pick a worker from the list', 'error'); return; }
     const current = membersOf(t);
     if (current.includes(w.name)) { toast('Already in this team today', 'error'); return; }
-    const other = conflictTeam(rosterIndex(rosterRows), teams, t.id, rosterDate, w.name);
+    const other = conflictTeam(rosterIndex(rosterRows), teams, t.id, SEL, w.name);
     if (other) { toast(`${w.name} is already in ${other} on this day — remove him there first`, 'error'); return; }
     try { await saveMembers(t, [...current, w.name]); } catch (e) { toast('Save failed: ' + e.message, 'error'); return; }
     renderCards(); toast(`${w.name} added`);
@@ -396,13 +395,10 @@ async function renderTeams() {
   }
 
   function renderCards() {
-    const label = rosterDate === TODAY ? 'today' : rosterDate;
+    const label = SEL === TODAY ? 'today' : SEL;
     el.innerHTML = `
       <div class="team-setup-card" style="border-left:4px solid #1967D2;">
-        <div class="field" style="margin-bottom:6px;">
-          <label>📅 Teams for date</label>
-          <input type="date" value="${rosterDate}" onchange="setRosterDate(this.value)" style="font-size:15px;padding:10px 12px;" />
-        </div>
+        <div style="font-weight:700;margin-bottom:6px;">📅 Teams for ${fmtD(SEL)}</div>
         <div style="font-size:12px;color:#667085;">Teams are fixed for <b>${label}</b> only. Changes here never affect other days. A new day starts as a copy of the previous day's teams.</div>
       </div>` +
       teams.map(t => {
@@ -438,7 +434,6 @@ async function renderTeams() {
     window.addMember = addMember;
     window.removeMember = removeMember;
     window.addTeam = addTeam;
-    window.setRosterDate = (d) => { if (d) { rosterDate = d; renderCards(); } };
     window.filterW = (id, val) => {
       const s = document.getElementById(`wsel-${id}`); if (!s) return;
       const f = val ? workers.filter(w => w.name.toLowerCase().includes(val.toLowerCase())) : workers;
@@ -453,10 +448,10 @@ async function renderLog(days) {
   logDays = days;
   const el = document.getElementById('log-content');
   el.innerHTML = '<div class="state-msg">Loading…</div>';
-  const from = new Date(); if (days > 0) from.setDate(from.getDate() - days);
+  const from = new Date(SEL + 'T12:00:00Z'); if (days > 0) from.setUTCDate(from.getUTCDate() - days);
   const fromStr = days === 365 ? '2020-01-01' : from.toISOString().slice(0, 10);
   const [lr, pr, tr] = await Promise.all([
-    supabase.from('production_log').select('*').gte('production_date', fromStr).lte('production_date', TODAY).order('production_date', { ascending: false }).order('created_at', { ascending: false }),
+    supabase.from('production_log').select('*').gte('production_date', fromStr).lte('production_date', SEL).order('production_date', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*'),
   ]);
@@ -491,7 +486,7 @@ async function refreshAfterEntryChange(date) {
   if (date < TODAY) { try { await closeDays(supabase, [date]); } catch (e) { console.warn(e.message); } }
   if (currentPage === 'log') { await renderLog(logDays); }
   else if (currentPage === 'production') {
-    const d = document.getElementById('prod-date')?.value || TODAY;
+    const d = SEL;
     await loadLogsForDate(d); updateKPIs(); renderTodayLog();
   }
 }
@@ -570,7 +565,7 @@ async function renderInventory() {
 
   // Overall KPIs
   const totalAll = logs.reduce((s, l) => s + Number(l.quantity || 0), 0);
-  const totalToday = logs.filter(l => l.production_date === TODAY_STR).reduce((s, l) => s + Number(l.quantity || 0), 0);
+  const totalToday = logs.filter(l => l.production_date === SEL).reduce((s, l) => s + Number(l.quantity || 0), 0);
   const totalMonth = logs.filter(l => l.production_date >= monthStart).reduce((s, l) => s + Number(l.quantity || 0), 0);
   const totalWeight = logs.reduce((s, l) => s + Number(l.weight || 0), 0);
 
@@ -583,15 +578,15 @@ async function renderInventory() {
     byProd[n].qty += Number(l.quantity || 0);
     byProd[n].wt += Number(l.weight || 0);
     if (l.production_date >= monthStart) byProd[n].month += Number(l.quantity || 0);
-    if (l.production_date === TODAY_STR) byProd[n].today += Number(l.quantity || 0);
+    if (l.production_date === SEL) byProd[n].today += Number(l.quantity || 0);
   });
 
   // By team — cost per kg for the SELECTED DAY only (wage of that day's team ÷ that day's weight)
   const byTeam = {};
-  teamDays.filter(r => r.date === invDate).forEach(td => {
+  teamDays.filter(r => r.date === SEL).forEach(td => {
     byTeam[td.team] = { qty: td.units, wt: td.weight, wage: td.wage, value: 0 };
   });
-  logs.filter(l => l.production_date === invDate).forEach(l => {
+  logs.filter(l => l.production_date === SEL).forEach(l => {
     const t = teamMap[l.team_id];
     const tName = t?.name || 'Team ' + (t?.team_number || '—');
     if (byTeam[tName]) byTeam[tName].value += Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
@@ -634,7 +629,7 @@ async function renderInventory() {
       <h2>📦 Inventory Overview</h2>
       <p>All production logged — data persists permanently</p>
       <div class="inv-hero-kpis">
-        <div class="inv-hero-kpi"><div class="val">${totalToday}</div><div class="lbl">Today</div></div>
+        <div class="inv-hero-kpi"><div class="val">${totalToday}</div><div class="lbl">${fmtD(SEL)}</div></div>
         <div class="inv-hero-kpi"><div class="val">${totalMonth}</div><div class="lbl">This Month</div></div>
         <div class="inv-hero-kpi"><div class="val">${totalAll}</div><div class="lbl">All Time</div></div>
       </div>
@@ -648,9 +643,8 @@ async function renderInventory() {
       <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
     </div>
 
-    <div class="section-head"><div class="section-title">Team Cost per Kg — ${invDate === TODAY ? 'Today' : invDate}</div><div class="section-sub">That day's wage ÷ that day's weight · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
-    <div class="field" style="max-width:240px;margin-bottom:12px;"><label>📅 Date</label><input type="date" value="${invDate}" max="${TODAY}" onchange="setInvDate(this.value)" style="font-size:15px;padding:10px 12px;" /></div>
-    <div class="team-cost-grid">${teamCards}</div>
+    <div class="section-head"><div class="section-title">Team Cost per Kg — ${fmtD(SEL)}</div><div class="section-sub">That day's wage ÷ that day's weight · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
+        <div class="team-cost-grid">${teamCards}</div>
 
     <div class="section-head"><div class="section-title">Charts</div></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;" id="chart-grid">
@@ -659,7 +653,7 @@ async function renderInventory() {
         <canvas id="chart-prod"></canvas>
       </div>
       <div class="chart-card">
-        <h3>Cost per Kg by Team (₹) — ${invDate === TODAY ? 'today' : invDate}</h3>
+        <h3>Cost per Kg by Team (₹) — ${SEL === TODAY ? 'today' : SEL}</h3>
         <canvas id="chart-cpkg"></canvas>
       </div>
     </div>
@@ -674,12 +668,11 @@ async function renderInventory() {
 
     <div class="section-head"><div class="section-title">Product Breakdown</div></div>
     <div class="table-wrap"><table class="dt">
-      <thead><tr><th>Product</th><th class="num">Today</th><th class="num">This Month</th><th class="num">All Time</th><th class="num">Weight (kg)</th><th class="num">Total Value</th></tr></thead>
+      <thead><tr><th>Product</th><th class="num">${fmtD(SEL)}</th><th class="num">This Month</th><th class="num">All Time</th><th class="num">Weight (kg)</th><th class="num">Total Value</th></tr></thead>
       <tbody>${prodRows}</tbody>
     </table></div>`;
 
   loadMonthly(supabase).then(r => { const m = document.getElementById('month-record'); if (m) m.innerHTML = monthlyTableHTML(r, 'dt'); }).catch(() => {});
-  window.setInvDate = (d) => { if (d) { invDate = d; renderInventory(); } };
 
   // Charts
   requestAnimationFrame(() => {
@@ -707,7 +700,23 @@ async function renderInventory() {
 }
 
 // ── Init ──
+async function rerender() {
+  await loadLogsForDate(SEL);
+  if (currentPage === 'log') await renderLog(logDays);
+  else showPage(currentPage);
+}
+function wireGlobalDate() {
+  const inp = document.getElementById('global-date');
+  const btn = document.getElementById('date-today');
+  inp.value = SEL; inp.max = TODAY;
+  const sync = () => { inp.value = SEL; btn.style.display = SEL === TODAY ? 'none' : ''; document.getElementById('date-note').textContent = SEL === TODAY ? 'Showing today' : 'Showing ' + fmtD(SEL); };
+  inp.addEventListener('change', () => { if (!inp.value) return; SEL = inp.value > TODAY ? TODAY : inp.value; try { sessionStorage.setItem('ml_date', SEL); } catch {} sync(); rerender(); });
+  btn.addEventListener('click', () => { SEL = TODAY; try { sessionStorage.removeItem('ml_date'); } catch {} sync(); rerender(); });
+  sync();
+}
 async function init() {
+  try { const d = sessionStorage.getItem('ml_date'); if (d && d <= TODAY) SEL = d; } catch {}
+  wireGlobalDate();
   startAutoClose(supabase);
   await loadData();
   showPage('dashboard');

@@ -26,6 +26,8 @@ export async function renderDashboard(root) {
       <button class="range-btn" data-d="365">1 Year</button>
     </div>
     <div id="dash-days"></div>
+    <div class="section-head"><div><div class="section-title">Team Performance</div><div class="section-sub">Per team over the selected period · total labour cost ÷ total weight</div></div></div>
+    <div id="dash-teamperf"></div>
     <div class="section-head"><div><div class="section-title">Team-wise Cost per Kg (each day)</div><div class="section-sub">Each team's wage for that day ÷ that day's weight</div></div></div>
     <div id="dash-teamdays"></div>
     <div class="section-head"><div><div class="section-title">Cost per Kg vs Weight</div><div class="section-sub">Each dot = one team's day · wage (daily rate × ${OVERTIME_MULTIPLIER}) ÷ weight produced</div></div></div>
@@ -57,12 +59,15 @@ export async function renderDashboard(root) {
     const teamDays = buildTeamDays(logs, tr.data || [], wr.data || [], rosters, summaries);
     const tCost = sumDays(teamDays.filter(r => r.date === TODAY));
     const active = new Set(tl.map(l => l.team_id)).size;
+    const rangeTot = sumDays(teamDays);
+    const rangeName = { 7: 'last 7 days', 30: 'last 30 days', 90: 'last 3 months', 365: 'last year' }[days];
     root.querySelector('#dash-kpis').innerHTML = `
       <div class="kpi-grid">
         <div class="kpi-card" style="--accent-color:var(--primary)"><div class="kpi-icon">🏭</div><div class="kpi-label">Units Today</div><div class="kpi-value">${tUnits.toLocaleString('en-IN')}</div><div class="kpi-sub">${tl.length} entries</div></div>
         <div class="kpi-card" style="--accent-color:var(--green)"><div class="kpi-icon">💰</div><div class="kpi-label">Value Today</div><div class="kpi-value">${inr(tVal)}</div><div class="kpi-sub">at selling price</div></div>
         <div class="kpi-card" style="--accent-color:var(--orange)"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight Today</div><div class="kpi-value">${tWt.toFixed(1)}</div><div class="kpi-sub">Kilograms</div></div>
         <div class="kpi-card" style="--accent-color:var(--red)"><div class="kpi-icon">🧮</div><div class="kpi-label">Cost per kg Today</div><div class="kpi-value">${tCost.cpk > 0 ? '₹' + tCost.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ${inr(tCost.wage)} ÷ ${tWt.toFixed(1)} kg</div></div>
+        <div class="kpi-card" style="--accent-color:var(--red)"><div class="kpi-icon">🏭</div><div class="kpi-label">Factory Cost per kg</div><div class="kpi-value">${rangeTot.cpk > 0 ? '₹' + rangeTot.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">${rangeName} · ${inr(rangeTot.wage)} ÷ ${Math.round(rangeTot.weight).toLocaleString('en-IN')} kg</div></div>
         <div class="kpi-card" style="--accent-color:var(--red)"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Cost per kg</div><div class="kpi-value">${allCost.overall.cpk > 0 ? '₹' + allCost.overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ${inr(allCost.overall.wage)} ÷ ${Math.round(allCost.overall.weight).toLocaleString('en-IN')} kg</div></div>
         <div class="kpi-card" style="--accent-color:var(--purple)"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${active}</div><div class="kpi-sub">of ${(tr.data || []).length} total</div></div>
       </div>`;
@@ -79,6 +84,18 @@ export async function renderDashboard(root) {
       <thead><tr><th>Date</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Cost/kg</th></tr></thead>
       <tbody>${dRows}</tbody>
       ${dayKeys.length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Total (${dayKeys.length} days)</td><td class="num">${tot.u.toLocaleString('en-IN')}</td><td class="num">${tot.w.toFixed(1)} kg</td><td class="num">${inr(tot.v)}</td><td class="num">${inr(tot.g)}</td><td class="num">${tot.w > 0 ? '₹' + (tot.g / tot.w).toFixed(2) : '—'}</td></tr></tfoot>` : ''}
+    </table></div>`;
+
+    // team performance over the period
+    const byTeam = {};
+    teamDays.forEach(r => { const t = byTeam[r.team] ||= { days: 0, units: 0, weight: 0, wage: 0 }; t.days++; t.units += r.units; t.weight += r.weight; t.wage += r.wage; });
+    const tpRows = Object.entries(byTeam).sort((a, b) => (a[1].weight > 0 ? a[1].wage / a[1].weight : 1e9) - (b[1].weight > 0 ? b[1].wage / b[1].weight : 1e9))
+      .map(([n, t]) => `<tr><td class="bold">${n}</td><td class="num">${t.days}</td><td class="num">${t.units.toLocaleString('en-IN')}</td><td class="num">${t.weight.toFixed(1)} kg</td><td class="num">${inr(t.wage)}</td><td class="num" style="font-weight:600;">${t.weight > 0 ? '₹' + (t.wage / t.weight).toFixed(2) : '—'}</td></tr>`).join('')
+      || '<tr><td colspan="6" style="text-align:center;color:var(--ink-dim);padding:20px;">No production in this period</td></tr>';
+    root.querySelector('#dash-teamperf').innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Team</th><th class="num">Days</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Wage</th><th class="num">Cost/kg</th></tr></thead>
+      <tbody>${tpRows}</tbody>
+      ${Object.keys(byTeam).length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Factory</td><td></td><td class="num">${rangeTot.units.toLocaleString('en-IN')}</td><td class="num">${rangeTot.weight.toFixed(1)} kg</td><td class="num">${inr(rangeTot.wage)}</td><td class="num">${rangeTot.weight > 0 ? '₹' + rangeTot.cpk.toFixed(2) : '—'}</td></tr></tfoot>` : ''}
     </table></div>`;
 
     // team-wise cost per kg for each day

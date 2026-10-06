@@ -491,7 +491,11 @@ table.data-table td.bold { font-weight: 700; }
 }
 
 @media (max-width: 768px) {
-  .mobile-topbar { display: flex; }
+  .app-shell { display: block; }
+  .app-main { width: 100%; min-width: 0; margin-left: 0; }
+  html, body { overflow-x: hidden; }
+  .mobile-topbar { display: flex; width: 100%; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .app-topbar { display: none; }
 
   .sidebar {
