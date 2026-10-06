@@ -1,15 +1,21 @@
 import { supabase } from './supabaseClient.js';
+import { fetchTeamDailyWageTotals } from './teams.js';
+import { summarize, groupByProduct, groupByTeam } from './calculations.js';
 
 /**
- * Production rows for a date range, with team and product joined.
+ * Production rows for a factory-local date range (inclusive), with team,
+ * supervisor and product pricing joined in — everything the profit
+ * calculations need, in one query.
  */
 export async function fetchProductionRows({ from, to }) {
   const { data, error } = await supabase
     .from('production_log')
     .select(
-      `id, quantity, weight, production_date, production_time, created_at,
-      teams ( id, team_number, name ),
-      products ( id, name, selling_price, cost_price )`
+      `
+      id, quantity, weight, production_date, production_time, created_at,
+      teams ( id, team_number, supervisor_id, supervisors ( id, name ) ),
+      products ( id, name, selling_price, rm_cost )
+    `
     )
     .gte('production_date', from)
     .lte('production_date', to)
@@ -20,30 +26,31 @@ export async function fetchProductionRows({ from, to }) {
 }
 
 /**
- * Summary + rows for the dashboard.
+ * Everything a Dashboard / Profit & Loss page needs for a date range:
+ * the raw rows, the overall summary, and the product/team breakdowns.
  */
 export async function fetchAnalytics({ from, to }) {
-  const rows = await fetchProductionRows({ from, to });
-
-  let units = 0, weight = 0, value = 0;
-  for (const row of rows) {
-    const qty = Number(row.quantity) || 0;
-    units  += qty;
-    weight += Number(row.weight) || 0;
-    value  += qty * Number(row.products?.selling_price || 0);
-  }
+  const [rows, teamDailyWageTotals] = await Promise.all([
+    fetchProductionRows({ from, to }),
+    fetchTeamDailyWageTotals(),
+  ]);
 
   return {
     rows,
-    summary: { units, weight, value },
+    summary: summarize(rows, teamDailyWageTotals),
+    byProduct: groupByProduct(rows),
+    byTeam: groupByTeam(rows, teamDailyWageTotals),
   };
 }
 
-/** Subscribe to new production entries — callers refetch on change. */
+/** Subscribe to new production entries — callers should refetch on change. */
 export function subscribeToProductionChanges(onChange) {
   const channel = supabase
-    .channel('production_log_all_' + Date.now())
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_log' }, () => onChange())
+    .channel('production_log_changes')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_log' }, () =>
+      onChange()
+    )
     .subscribe();
+
   return () => supabase.removeChannel(channel);
 }

@@ -1,84 +1,141 @@
-import { fetchProductionByRange } from '../../services/production.js';
-import { fetchProducts } from '../../services/products.js';
-import { fetchTeamsAll } from '../../services/teams.js';
-import { fetchActiveSupervisors } from '../../services/supervisors.js';
+import { fetchAnalytics, subscribeToProductionChanges } from '../../services/analytics.js';
+import { initRangeFilter } from '../../components/rangeFilter.js';
+import { formatRupees, formatNumber } from '../../components/kpiRow.js';
+import { flashLivePill } from '../../components/livePill.js';
+import { lineValue, lineRmCost, marginPct } from '../../services/calculations.js';
+import { formatFactoryClock } from '../../utils/date.js';
 
-export async function renderProductionLog(root) {
-  root.innerHTML = `
-    <div class="range-bar">
-      <button class="range-btn active" data-days="0">Today</button>
-      <button class="range-btn" data-days="7">7 Days</button>
-      <button class="range-btn" data-days="30">30 Days</button>
-      <button class="range-btn" data-days="90">3 Months</button>
+export async function render(container) {
+  container.innerHTML = `
+    <div id="range-filter"></div>
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Production log</h2>
+        <div class="form-grid" style="min-width: 360px">
+          <select id="pl-team-filter"><option value="">All teams</option></select>
+          <select id="pl-product-filter"><option value="">All products</option></select>
+        </div>
+      </div>
+      <div id="pl-table-root"><p class="state-msg">Loading…</p></div>
     </div>
-    <div id="log-content"><div class="state-msg">Loading…</div></div>
   `;
 
-  let currentDays = 0;
+  const tableRoot = container.querySelector('#pl-table-root');
+  const teamFilter = container.querySelector('#pl-team-filter');
+  const productFilter = container.querySelector('#pl-product-filter');
 
-  async function loadLog(days) {
-    const logContent = document.getElementById('log-content');
-    logContent.innerHTML = '<div class="state-msg">Loading…</div>';
+  let currentRange = null;
+  let allRows = [];
+  let isFirstLoad = true;
 
-    const from = new Date();
-    if (days > 0) from.setDate(from.getDate() - days);
-    const fromStr = from.toISOString().slice(0,10);
-    const toStr = new Date().toISOString().slice(0,10);
+  function populateFilters(rows) {
+    const teams = new Map();
+    const productNames = new Set();
+    for (const r of rows) {
+      if (r.teams) teams.set(r.teams.id, `Team ${r.teams.team_number}`);
+      if (r.products) productNames.add(r.products.name);
+    }
+    const teamSelected = teamFilter.value;
+    teamFilter.innerHTML =
+      '<option value="">All teams</option>' +
+      Array.from(teams.entries())
+        .map(([id, label]) => `<option value="${id}"${id === teamSelected ? ' selected' : ''}>${label}</option>`)
+        .join('');
 
-    const [logs, products, teams, supervisors] = await Promise.all([
-      fetchProductionByRange(fromStr, toStr),
-      fetchProducts(),
-      fetchTeamsAll(),
-      fetchActiveSupervisors(),
-    ]);
+    const productSelected = productFilter.value;
+    productFilter.innerHTML =
+      '<option value="">All products</option>' +
+      Array.from(productNames)
+        .sort()
+        .map((name) => `<option value="${escapeHtml(name)}"${name === productSelected ? ' selected' : ''}>${escapeHtml(name)}</option>`)
+        .join('');
+  }
 
-    const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
-    const teamMap = Object.fromEntries(teams.map(t => [t.id, t]));
-    const supMap = Object.fromEntries(supervisors.map(s => [s.id, s]));
-    const teamSupMap = Object.fromEntries(teams.map(t => [t.id, t.supervisor_id]));
+  function applyFiltersAndRender() {
+    const teamId = teamFilter.value;
+    const productName = productFilter.value;
+    const filtered = allRows.filter((r) => {
+      if (teamId && r.teams?.id !== teamId) return false;
+      if (productName && r.products?.name !== productName) return false;
+      return true;
+    });
+    renderTable(filtered);
+  }
 
-    const totalUnits = logs.reduce((s,l)=>s+Number(l.quantity||0),0);
-    const totalWeight = logs.reduce((s,l)=>s+Number(l.weight||0),0);
-
-    const rows = logs.map(l => {
-      const prod = prodMap[l.product_id];
-      const team = teamMap[l.team_id];
-      const supId = teamSupMap[l.team_id];
-      const sup = supMap[supId];
-      return `<tr>
-        <td>${l.production_date}</td>
-        <td>${sup?.name||'—'}</td>
-        <td>Team ${team?.team_number||'—'}</td>
-        <td class="bold">${prod?.name||'—'}</td>
-        <td class="num">${l.quantity}</td>
-        <td class="num">${Number(l.weight).toFixed(1)} kg</td>
-        <td style="color:var(--ink-dim);font-size:12px;">${l.production_time||''}</td>
-      </tr>`;
-    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--ink-dim);">No entries in this period</td></tr>';
-
-    logContent.innerHTML = `
-      <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
-        <div class="kpi-card"><div class="kpi-label">Total Units</div><div class="kpi-value">${totalUnits}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Total Weight</div><div class="kpi-value">${totalWeight.toFixed(1)} kg</div></div>
-        <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${logs.length}</div></div>
-      </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead><tr><th>Date</th><th>Supervisor</th><th>Team</th><th>Product</th><th class="num">Qty</th><th class="num">Weight</th><th>Time</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
+  function renderTable(rows) {
+    if (rows.length === 0) {
+      tableRoot.innerHTML = '<p class="state-msg">No production entries match this filter.</p>';
+      return;
+    }
+    tableRoot.innerHTML = `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Time</th><th>Supervisor</th><th>Team</th><th>Product</th>
+            <th class="num">Qty</th><th class="num">Weight</th><th class="num">Value</th>
+            <th class="num">RM cost</th><th class="num">Profit*</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map((r) => {
+              const qty = Number(r.quantity) || 0;
+              const value = lineValue(qty, r.products?.selling_price);
+              const rmCost = lineRmCost(qty, r.products?.rm_cost);
+              const profit = value - rmCost;
+              return `
+              <tr>
+                <td>${r.production_date}</td>
+                <td>${formatFactoryClock(r.created_at)}</td>
+                <td>${r.teams?.supervisors?.name ?? '—'}</td>
+                <td>Team ${r.teams?.team_number ?? '—'}</td>
+                <td>${r.products?.name ?? '—'}</td>
+                <td class="num">${formatNumber(qty)}</td>
+                <td class="num">${formatNumber(r.weight)} kg</td>
+                <td class="num">${formatRupees(value)}</td>
+                <td class="num">${formatRupees(rmCost)}</td>
+                <td class="num">${formatRupees(profit)}</td>
+              </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+      <p class="hint" style="margin-top: var(--space-3)">* Before wage cost — see Profit &amp; Loss for the full picture including team wages.</p>
     `;
   }
 
-  root.querySelectorAll('.range-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      root.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentDays = parseInt(btn.dataset.days);
-      loadLog(currentDays);
-    });
+  async function load() {
+    if (!currentRange) return;
+    try {
+      const { rows } = await fetchAnalytics(currentRange);
+      allRows = rows;
+      populateFilters(rows);
+      applyFiltersAndRender();
+      if (!isFirstLoad) flashLivePill('Updated just now');
+      isFirstLoad = false;
+    } catch (err) {
+      console.error(err);
+      tableRoot.innerHTML = '<p class="error-text">Could not load the production log.</p>';
+    }
+  }
+
+  teamFilter.addEventListener('change', applyFiltersAndRender);
+  productFilter.addEventListener('change', applyFiltersAndRender);
+
+  initRangeFilter(container.querySelector('#range-filter'), {
+    initial: 'week',
+    onChange: (range) => {
+      currentRange = range;
+      load();
+    },
   });
 
-  loadLog(0);
+  const unsubscribe = subscribeToProductionChanges(load);
+  return unsubscribe;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
 }

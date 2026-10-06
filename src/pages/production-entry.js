@@ -1,146 +1,151 @@
 import { fetchTeamsForSupervisor } from '../services/teams.js';
-import { fetchProducts } from '../services/products.js';
-import { insertProductionLog, fetchTodayLogForSupervisor } from '../services/production.js';
-import { getSession, setSelectedTeam } from '../utils/session.js';
-import { showToast } from '../components/toast.js';
-import { today } from '../utils/date.js';
+import { fetchActiveProducts } from '../services/products.js';
+import { insertProduction } from '../services/production.js';
+import { validatePositiveNumber } from '../utils/validate.js';
+import { showSuccess, showError } from '../components/toast.js';
+import { getSession, setSelectedTeamId } from '../utils/session.js';
+import { createProductCombobox } from '../components/productCombobox.js';
 
+/**
+ * Screen 3 — Production Entry. The whole app exists to make this screen fast:
+ * pick team + product, type two numbers, save, and the form is ready for the
+ * next entry without leaving the page.
+ */
 export function initProductionEntryView({ onManageTeams, onSwitchSupervisor }) {
-  let currentSupervisor = null;
-  let teams = [];
-  let products = [];
-  let logs = [];
-  let selectedTeamId = null;
-
-  const supNameEl = document.getElementById('prod-supervisor-name');
-  const teamTabsEl = document.getElementById('team-tabs');
-  const productSelect = document.getElementById('product-select');
+  const teamSelect = document.getElementById('team-select');
+  const comboboxMount = document.getElementById('product-combobox');
   const qtyInput = document.getElementById('quantity-input');
   const weightInput = document.getElementById('weight-input');
+  const qtyError = document.getElementById('quantity-error');
+  const weightError = document.getElementById('weight-error');
   const saveBtn = document.getElementById('btn-save-production');
-  const logListEl = document.getElementById('prod-log-list');
-  const kpiUnits = document.getElementById('kpi-units');
-  const kpiWeight = document.getElementById('kpi-weight');
-  const kpiEntries = document.getElementById('kpi-entries');
+  const manageBtn = document.getElementById('btn-manage-teams');
+  const switchBtn = document.getElementById('btn-switch-supervisor-2');
 
-  document.getElementById('btn-manage-teams').addEventListener('click', () => {
-    if (currentSupervisor) onManageTeams(currentSupervisor);
-  });
-  document.getElementById('btn-switch-supervisor-2').addEventListener('click', onSwitchSupervisor);
+  let supervisor = null;
+  let products = [];
+  let saving = false;
 
-  saveBtn.addEventListener('click', async () => {
-    const productId = productSelect.value;
-    const qty = parseFloat(qtyInput.value);
-    const weight = parseFloat(weightInput.value);
+  const combobox = createProductCombobox([], { placeholder: 'Search products…' });
+  comboboxMount.appendChild(combobox.element);
 
-    if (!selectedTeamId) { showToast('Select a team first', 'error'); return; }
-    if (!productId) { showToast('Select a product', 'error'); return; }
-    if (!qty || qty <= 0) { showToast('Enter valid quantity', 'error'); return; }
-    if (!weight || weight <= 0) { showToast('Enter valid weight', 'error'); return; }
-
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving…';
-
+  async function loadProducts() {
+    if (products.length) return; // catalogue doesn't change mid-shift; load once
     try {
-      const now = new Date();
-      const entry = await insertProductionLog({
-        team_id: selectedTeamId,
-        product_id: productId,
-        quantity: qty,
-        weight: weight,
-        production_date: today(),
-        production_time: now.toTimeString().slice(0,5),
-      });
+      products = await fetchActiveProducts();
+      combobox.setProducts(products);
+      if (products.length === 0) showError('No active products found. Add one in Products.');
+    } catch (err) {
+      console.error(err);
+      showError('Could not load products. Check your connection.');
+    }
+  }
 
-      if (entry) {
-        logs.unshift(entry);
-        qtyInput.value = '';
-        weightInput.value = '';
-        productSelect.value = '';
-        renderLog();
-        updateKPIs();
-        showToast('Production saved ✓', 'success');
+  async function loadTeams() {
+    teamSelect.innerHTML = '<option value="">Loading teams…</option>';
+    try {
+      const teams = await fetchTeamsForSupervisor(supervisor.id);
+      if (teams.length === 0) {
+        teamSelect.innerHTML = '<option value="">No teams yet — add one first</option>';
+        return;
       }
-    } catch(e) {
-      showToast('Save failed. Try again.', 'error');
+      teamSelect.innerHTML = teams
+        .map((t) => `<option value="${t.id}">Team ${t.team_number}</option>`)
+        .join('');
+
+      const session = getSession();
+      if (
+        session.selectedTeamId &&
+        teams.some((t) => String(t.id) === String(session.selectedTeamId))
+      ) {
+        teamSelect.value = session.selectedTeamId;
+      } else {
+        setSelectedTeamId(teamSelect.value);
+      }
+    } catch (err) {
+      console.error(err);
+      teamSelect.innerHTML = '<option value="">Could not load teams</option>';
+      showError('Could not load teams. Check your connection.');
+    }
+  }
+
+  teamSelect.addEventListener('change', () => setSelectedTeamId(teamSelect.value));
+
+  function clearFieldErrors() {
+    qtyError.hidden = true;
+    weightError.hidden = true;
+  }
+
+  async function handleSave() {
+    if (saving) return;
+    clearFieldErrors();
+
+    const teamId = teamSelect.value;
+    const product = combobox.getSelectedProduct();
+    const quantityRaw = qtyInput.value;
+    const weightRaw = weightInput.value;
+
+    let hasError = false;
+
+    if (!teamId) {
+      showError('Select a team first.');
+      hasError = true;
+    }
+    if (!product) {
+      showError('Select a product first.');
+      hasError = true;
     }
 
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Save Entry';
-  });
+    const qtyMsg = validatePositiveNumber(quantityRaw, 'Quantity');
+    if (qtyMsg) {
+      qtyError.textContent = qtyMsg;
+      qtyError.hidden = false;
+      hasError = true;
+    }
 
-  function renderTeamTabs() {
-    teamTabsEl.innerHTML = teams.map(t => `
-      <button class="team-tab ${t.id === selectedTeamId ? 'active' : ''}" data-id="${t.id}">
-        Team ${t.team_number}
-      </button>
-    `).join('');
+    const weightMsg = validatePositiveNumber(weightRaw, 'Weight');
+    if (weightMsg) {
+      weightError.textContent = weightMsg;
+      weightError.hidden = false;
+      hasError = true;
+    }
 
-    teamTabsEl.querySelectorAll('.team-tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        selectedTeamId = btn.dataset.id;
-        setSelectedTeam(selectedTeamId);
-        renderTeamTabs();
+    if (hasError) return;
+
+    saving = true;
+    saveBtn.disabled = true;
+    try {
+      await insertProduction({
+        teamId,
+        productId: product.id,
+        quantity: Number(quantityRaw),
+        weight: Number(weightRaw),
       });
-    });
-  }
-
-  function renderProducts() {
-    productSelect.innerHTML = '<option value="">Select product…</option>' +
-      products.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-  }
-
-  function renderLog() {
-    if (!logs.length) {
-      logListEl.innerHTML = '<div class="state-msg">No entries yet today</div>';
-      return;
+      showSuccess('Production saved');
+      // Reset only quantity/weight — team and product usually carry over to
+      // the next entry on a factory floor, so leave them selected.
+      qtyInput.value = '';
+      weightInput.value = '';
+      qtyInput.focus();
+    } catch (err) {
+      console.error(err);
+      showError('Production could not be saved. Please try again.');
+      // Do not clear the form on failure (see README — data safety).
+    } finally {
+      saving = false;
+      saveBtn.disabled = false;
     }
-    const teamMap = Object.fromEntries(teams.map(t => [t.id, t]));
-    const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
-    logListEl.innerHTML = logs.map(l => {
-      const team = teamMap[l.team_id];
-      const prod = prodMap[l.product_id];
-      return `
-        <div class="prod-log-item">
-          <div>
-            <div class="prod-name">${prod ? prod.name : 'Unknown'}</div>
-            <div class="prod-meta">${team ? 'Team '+team.team_number : ''} · ${l.production_time||''}</div>
-          </div>
-          <div style="text-align:right;">
-            <div class="prod-qty">${l.quantity}</div>
-            <div class="prod-qty-label">pcs · ${l.weight}kg</div>
-          </div>
-        </div>`;
-    }).join('');
   }
 
-  function updateKPIs() {
-    const totalUnits = logs.reduce((s, l) => s + Number(l.quantity||0), 0);
-    const totalWeight = logs.reduce((s, l) => s + Number(l.weight||0), 0);
-    kpiUnits.textContent = totalUnits;
-    kpiWeight.textContent = totalWeight.toFixed(1);
-    kpiEntries.textContent = logs.length;
-  }
+  saveBtn.addEventListener('click', handleSave);
+  manageBtn.addEventListener('click', () => onManageTeams(supervisor));
+  switchBtn.addEventListener('click', () => onSwitchSupervisor());
 
-  async function refresh(supervisor) {
-    currentSupervisor = supervisor;
-    supNameEl.textContent = `Supervisor: ${supervisor.name}`;
-
-    const session = getSession();
-    selectedTeamId = session.selectedTeamId || null;
-
-    [teams, products, logs] = await Promise.all([
-      fetchTeamsForSupervisor(supervisor.id).catch(() => []),
-      fetchProducts().catch(() => []),
-      fetchTodayLogForSupervisor(supervisor.id).catch(() => []),
-    ]);
-
-    if (!selectedTeamId && teams.length) selectedTeamId = teams[0].id;
-
-    renderTeamTabs();
-    renderProducts();
-    renderLog();
-    updateKPIs();
+  async function refresh(sup) {
+    supervisor = sup;
+    document.getElementById('prod-supervisor-name').textContent = sup.name;
+    clearFieldErrors();
+    await Promise.all([loadTeams(), loadProducts()]);
   }
 
   return { refresh };

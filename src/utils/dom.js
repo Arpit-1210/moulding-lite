@@ -1,3 +1,6 @@
+/** Escapes text before it's interpolated into innerHTML (supervisor/member names come from user input). */
 export function escapeHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const div = document.createElement('div');
+  div.textContent = str ?? '';
+  return div.innerHTML;
 }

@@ -1,16 +1,18 @@
 {
   "name": "moulding-lite",
-  "version": "1.0.0",
-  "description": "Moulding Department Production App — Factory OS",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Factory OS \u2014 Moulding Module v0.1 (peak-season production control, Lite)",
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.45.4"
   },
   "devDependencies": {
-    "vite": "^5.0.0"
+    "vite": "^5.4.8"
   }
 }
