@@ -6,13 +6,33 @@ export async function renderProducts(root) {
   function renderList() {
     const rows = products.map(p => `
       <tr>
-        <td class="bold">${p.name}</td>
+        <td><input type="text" class="name-input" data-id="${p.id}" value="${p.name.replace(/"/g, '&quot;')}" style="width:100%;min-width:150px;border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:13px;font-weight:600;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="selling_price" value="${p.selling_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="cost_price" value="${p.cost_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td><span class="badge ${p.active?'badge-green':''}"> ${p.active?'Active':'Inactive'}</span></td>
       </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
 
     document.getElementById('products-table-body').innerHTML = rows;
+
+    // Auto-save on name change
+    document.querySelectorAll('.name-input').forEach(input => {
+      input.addEventListener('change', async () => {
+        const msg = document.getElementById('np-msg');
+        const prod = products.find(p => String(p.id) === String(input.dataset.id));
+        const name = input.value.trim();
+        if (!prod) return;
+        if (!name) { input.value = prod.name; msg.style.color = 'var(--red)'; msg.textContent = 'Name cannot be empty'; return; }
+        if (products.some(p => p !== prod && p.name.toLowerCase() === name.toLowerCase())) {
+          input.value = prod.name; msg.style.color = 'var(--red)'; msg.textContent = `"${name}" already exists`; return;
+        }
+        try {
+          await upsertProduct({ id: prod.id, name });
+          msg.style.color = 'var(--green)'; msg.textContent = `Renamed "${prod.name}" to "${name}"`;
+          prod.name = name;
+          products.sort((a, b) => a.name.localeCompare(b.name));
+        } catch (e) { input.value = prod.name; msg.style.color = 'var(--red)'; msg.textContent = 'Could not rename: ' + e.message; }
+      });
+    });
 
     // Auto-save on price change
     document.querySelectorAll('.price-input').forEach(input => {
@@ -53,7 +73,7 @@ export async function renderProducts(root) {
         <tbody id="products-table-body"></tbody>
       </table>
     </div>
-    <div style="margin-top:12px;font-size:12px;color:var(--ink-dim);">Click price cells to edit. Changes save automatically.</div>
+    <div style="margin-top:12px;font-size:12px;color:var(--ink-dim);">Tap a name or price to edit it. Changes save automatically and update everywhere, including past entries.</div>
   `;
 
   renderList();
