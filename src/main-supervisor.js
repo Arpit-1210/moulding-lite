@@ -1,6 +1,7 @@
 // v2.1 - date picker added
 import './styles/base.css';
 import { createClient } from '@supabase/supabase-js';
+import { buildTeamDays, sumDays, costVsWeightChart, OVERTIME_MULTIPLIER } from './utils/cost.js';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || '',
@@ -428,12 +429,15 @@ async function renderInventory() {
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
   const weekStr = weekAgo.toISOString().slice(0, 10);
 
-  const [lr, pr, tr] = await Promise.all([
-    supabase.from('production_log').select('*').order('production_date'),
+  const [lr, pr, tr, wr] = await Promise.all([
+    supabase.from('production_log').select('*').order('production_date').limit(50000),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*'),
+    supabase.from('workers').select('name, daily_rate'),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
+  const teamDays = buildTeamDays(logs, allTeams, wr.data || []);
+  const overall = sumDays(teamDays);
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
   const teamMap = Object.fromEntries(allTeams.map(t => [t.id, t]));
 
@@ -464,11 +468,13 @@ async function renderInventory() {
     const price = Number(p?.selling_price || 0);
     const qty = Number(l.quantity || 0);
     const wt = Number(l.weight || 0);
-    if (!byTeam[tName]) byTeam[tName] = { qty: 0, wt: 0, value: 0 };
+    if (!byTeam[tName]) byTeam[tName] = { qty: 0, wt: 0, value: 0, wage: 0 };
     byTeam[tName].qty += qty;
     byTeam[tName].wt += wt;
     byTeam[tName].value += qty * price;
   });
+
+  teamDays.forEach(td => { if (byTeam[td.team]) byTeam[td.team].wage += td.wage; });
 
   // Product chart data
   const prodLabels = Object.keys(byProd).slice(0, 10);
@@ -476,7 +482,7 @@ async function renderInventory() {
 
   // Team cost/kg chart data
   const teamLabels = Object.keys(byTeam);
-  const cpkgData = teamLabels.map(t => byTeam[t].wt > 0 ? +(byTeam[t].value / byTeam[t].wt).toFixed(0) : 0);
+  const cpkgData = teamLabels.map(t => byTeam[t].wt > 0 ? +(byTeam[t].wage / byTeam[t].wt).toFixed(2) : 0);
 
   // Product table rows
   const prodRows = Object.entries(byProd).sort((a, b) => b[1].qty - a[1].qty)
@@ -491,12 +497,13 @@ async function renderInventory() {
 
   // Team cost cards
   const teamCards = Object.entries(byTeam).map(([name, v]) => {
-    const cpkg = v.wt > 0 ? (v.value / v.wt).toFixed(0) : 0;
+    const cpkg = v.wt > 0 ? (v.wage / v.wt).toFixed(2) : 0;
     return `<div class="team-cost-card">
       <h4>${name}</h4>
       <div class="tcstat"><span class="l">Units Produced</span><span class="v">${v.qty}</span></div>
       <div class="tcstat"><span class="l">Total Weight</span><span class="v">${v.wt.toFixed(1)} kg</span></div>
       <div class="tcstat"><span class="l">Total Value</span><span class="v">₹${v.value.toLocaleString('en-IN')}</span></div>
+      <div class="tcstat"><span class="l">Total Wage (${OVERTIME_MULTIPLIER}x)</span><span class="v">₹${Math.round(v.wage).toLocaleString('en-IN')}</span></div>
       <div class="tcstat"><span class="l">Cost per kg</span><span class="v cpkg">${cpkg > 0 ? '₹' + Number(cpkg).toLocaleString('en-IN') : '—'}</span></div>
     </div>`;
   }).join('') || '<div class="state-msg">No team data</div>';
@@ -517,9 +524,10 @@ async function renderInventory() {
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-label">Total Weight</div><div class="kpi-value">${totalWeight.toFixed(0)} kg</div><div class="kpi-sub">all time</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">types made</div></div>
       <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-label">Teams</div><div class="kpi-value">${allTeams.length}</div><div class="kpi-sub">active teams</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
     </div>
 
-    <div class="section-head"><div class="section-title">Team Performance & Cost per Kg</div><div class="section-sub">Value ÷ Weight produced</div></div>
+    <div class="section-head"><div class="section-title">Team Performance & Cost per Kg</div><div class="section-sub">Total wage ÷ Total weight produced · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
     <div class="team-cost-grid">${teamCards}</div>
 
     <div class="section-head"><div class="section-title">Charts</div></div>
@@ -529,9 +537,14 @@ async function renderInventory() {
         <canvas id="chart-prod"></canvas>
       </div>
       <div class="chart-card">
-        <h3>Cost per Kg by Team (₹)</h3>
+        <h3>Cost per Kg by Team (₹) — wage ÷ weight</h3>
         <canvas id="chart-cpkg"></canvas>
       </div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:20px;">
+      <h3>Cost per Kg vs Weight Produced (each dot = one team's day)</h3>
+      <canvas id="chart-cpk-weight"></canvas>
     </div>
 
     <div class="section-head"><div class="section-title">Product Breakdown</div></div>
@@ -557,6 +570,7 @@ async function renderInventory() {
         options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: v => '₹' + v } } }, responsive: true }
       });
     }
+    if (teamDays.length) new Chart(document.getElementById('chart-cpk-weight'), costVsWeightChart(teamDays));
     // Make charts stack on mobile
     if (window.innerWidth < 600) {
       document.getElementById('chart-grid').style.gridTemplateColumns = '1fr';
