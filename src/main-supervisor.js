@@ -1,7 +1,9 @@
 // v2.1 - date picker added
 import './styles/base.css';
 import { createClient } from '@supabase/supabase-js';
-import { buildTeamDays, sumDays, costVsWeightChart, OVERTIME_MULTIPLIER } from './utils/cost.js';
+import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from './utils/cost.js';
+import { startAutoClose, closeDays, loadMonthly, monthlyTableHTML } from './utils/dayclose.js';
+import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster } from './utils/roster.js';
 
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL || '',
@@ -12,7 +14,8 @@ const supabase = createClient(
 let currentTeamId = null;
 let teams = [], products = [], workers = [], todayLogs = [];
 let currentPage = 'dashboard';
-const TODAY = new Date().toISOString().slice(0, 10);
+const TODAY = istToday();
+let invDate = TODAY;
 
 // ── Toast ──
 function toast(msg, type = 'success') {
@@ -108,6 +111,7 @@ async function renderDashboard() {
     supabase.from('teams').select('*'),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
+  const permanent = (await loadCostData(supabase)).overall;
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
   const totalUnits = logs.reduce((s, l) => s + Number(l.quantity || 0), 0);
   const totalWeight = logs.reduce((s, l) => s + Number(l.weight || 0), 0);
@@ -153,6 +157,7 @@ async function renderDashboard() {
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight (kg)</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">produced today</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${allTeams.length} total</div></div>
       <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made today</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Cost per kg</div><div class="kpi-value">${permanent.cpk > 0 ? '₹' + permanent.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ₹${Math.round(permanent.wage).toLocaleString('en-IN')} ÷ ${permanent.weight.toFixed(0)} kg</div></div>
     </div>
     <div class="section-head"><div><div class="section-title">Teams — Today</div></div></div>
     <div class="team-grid">${teamCards}</div>
@@ -183,6 +188,7 @@ async function renderProduction() {
         <input type="date" id="prod-date" value="${TODAY}" max="${TODAY}" style="font-size:15px;padding:10px 12px;" />
       </div>
       <div class="team-tabs" id="team-tabs"></div>
+      <div id="roster-note" style="font-size:12px;color:#667085;margin:-2px 0 12px;"></div>
       <div class="field">
         <label>Search Product</label>
         <input type="text" id="prod-search" placeholder="Type to search…" autocomplete="off" />
@@ -211,8 +217,22 @@ async function renderProduction() {
       currentTeamId = btn.dataset.id;
       tabsEl.querySelectorAll('.team-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      updateRosterNote();
     })
   );
+
+  let prodRosters = await fetchRosterRows(supabase);
+  function updateRosterNote() {
+    const d = document.getElementById('prod-date')?.value || TODAY;
+    const t = teams.find(x => x.id === currentTeamId);
+    const m = t ? membersOn(rosterIndex(prodRosters), t.id, d) : [];
+    const note = document.getElementById('roster-note');
+    if (!note) return;
+    note.innerHTML = m.length
+      ? `👷 ${m.length} workers on ${d === TODAY ? 'today' : d}: ${m.join(', ')}`
+      : `<span style="color:#dc2626;">⚠ No workers set for this team on ${d === TODAY ? 'today' : d} — set them in Teams first.</span>`;
+  }
+  updateRosterNote();
 
   // Product search
   const sel = document.getElementById('prod-select');
@@ -236,6 +256,14 @@ async function renderProduction() {
     if (!productId) { toast('Select a product', 'error'); return; }
     if (!qty || qty <= 0) { toast('Enter quantity', 'error'); return; }
     if (!wt || wt <= 0) { toast('Enter weight', 'error'); return; }
+    const dateForRoster = document.getElementById('prod-date')?.value || TODAY;
+    const idx = rosterIndex(prodRosters);
+    const dayMembers = membersOn(idx, currentTeamId, dateForRoster);
+    if (!dayMembers.length) { toast('Set this team’s workers for this date in Teams first', 'error'); return; }
+    if (!hasExact(idx, currentTeamId, dateForRoster)) {
+      try { await saveRoster(supabase, currentTeamId, dateForRoster, dayMembers); prodRosters = withRoster(prodRosters, currentTeamId, dateForRoster, dayMembers); }
+      catch (e) { toast('Could not save team for this day: ' + e.message, 'error'); return; }
+    }
     const btn = document.getElementById('btn-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     const now = new Date();
@@ -246,6 +274,7 @@ async function renderProduction() {
     }]).select().single();
     btn.disabled = false; btn.textContent = 'Save Entry';
     if (error) { toast('Save failed: ' + error.message, 'error'); return; }
+    if (selectedDate < TODAY) closeDays(supabase, [selectedDate]).catch(() => {});
     todayLogs.unshift(data);
     document.getElementById('prod-qty').value = '';
     document.getElementById('prod-wt').value = '';
@@ -262,6 +291,7 @@ async function renderProduction() {
   // When date changes, reload log
   document.getElementById('prod-date').addEventListener('change', async (e) => {
     const d = e.target.value;
+    updateRosterNote();
     const title = document.getElementById('log-date-title');
     if (title) title.textContent = d === TODAY ? "Today's Log" : `Log for ${d}`;
     await loadLogsForDate(d);
@@ -298,12 +328,23 @@ function renderTodayLog() {
     </div>`).join('');
 }
 
-// ── Teams ──
+// ── Teams (fixed per day) ──
+let rosterRows = [];
+let rosterDate = TODAY;
+
 async function renderTeams() {
   const el = document.getElementById('teams-content');
   el.innerHTML = '<div class="state-msg">Loading…</div>';
   const { data } = await supabase.from('teams').select('*').order('team_number');
   teams = data || [];
+  rosterRows = await fetchRosterRows(supabase);
+
+  const membersOf = t => membersOn(rosterIndex(rosterRows), t.id, rosterDate);
+
+  async function saveMembers(t, members) {
+    await saveRoster(supabase, t.id, rosterDate, members);
+    rosterRows = withRoster(rosterRows, t.id, rosterDate, members);
+  }
 
   async function addTeam() {
     const next = teams.length + 1;
@@ -313,7 +354,6 @@ async function renderTeams() {
     }]).select().single();
     if (t) { teams.push(t); renderCards(); toast('Team added'); }
     else {
-      // Try without supervisor_id if column is required
       const { data: t2 } = await supabase.from('teams').insert([{
         team_number: next, name: `Team ${next}`, members: []
       }]).select().single();
@@ -329,36 +369,51 @@ async function renderTeams() {
   }
 
   async function addMember(id, name) {
-    if (!name.trim()) return;
+    name = (name || '').trim();
+    if (!name) return;
     const t = teams.find(x => x.id === id); if (!t) return;
-    if ((t.members || []).includes(name.trim())) { toast('Already in team', 'error'); return; }
-    t.members = [...(t.members || []), name.trim()];
-    await supabase.from('teams').update({ members: t.members }).eq('id', id);
-    renderCards(); toast(`${name.trim()} added`);
+    const w = workers.find(x => x.name.toLowerCase() === name.toLowerCase());
+    if (!w) { toast('Pick a worker from the list', 'error'); return; }
+    const current = membersOf(t);
+    if (current.includes(w.name)) { toast('Already in this team today', 'error'); return; }
+    const other = conflictTeam(rosterIndex(rosterRows), teams, t.id, rosterDate, w.name);
+    if (other) { toast(`${w.name} is already in ${other} on this day — remove him there first`, 'error'); return; }
+    try { await saveMembers(t, [...current, w.name]); } catch (e) { toast('Save failed: ' + e.message, 'error'); return; }
+    renderCards(); toast(`${w.name} added`);
   }
 
   async function removeMember(id, name) {
     const t = teams.find(x => x.id === id); if (!t) return;
-    t.members = (t.members || []).filter(m => m !== name);
-    await supabase.from('teams').update({ members: t.members }).eq('id', id);
+    try { await saveMembers(t, membersOf(t).filter(m => m !== name)); } catch (e) { toast('Save failed: ' + e.message, 'error'); return; }
     renderCards();
   }
 
   function renderCards() {
-    el.innerHTML = teams.map(t => `
+    const label = rosterDate === TODAY ? 'today' : rosterDate;
+    el.innerHTML = `
+      <div class="team-setup-card" style="border-left:4px solid #1967D2;">
+        <div class="field" style="margin-bottom:6px;">
+          <label>📅 Teams for date</label>
+          <input type="date" value="${rosterDate}" onchange="setRosterDate(this.value)" style="font-size:15px;padding:10px 12px;" />
+        </div>
+        <div style="font-size:12px;color:#667085;">Teams are fixed for <b>${label}</b> only. Changes here never affect other days. A new day starts as a copy of the previous day's teams.</div>
+      </div>` +
+      teams.map(t => {
+        const members = membersOf(t);
+        return `
       <div class="team-setup-card">
         <div class="team-head">
           <span class="team-badge">👷 ${t.name || 'Team ' + t.team_number}</span>
-          <span style="font-size:12px;color:#667085;">${(t.members || []).length} members</span>
+          <span style="font-size:12px;color:#667085;">${members.length} members</span>
         </div>
         <div class="rename-row">
           <input type="text" id="rename-${t.id}" value="${t.name || 'Team ' + t.team_number}" placeholder="Team name" />
           <button class="btn-rename" onclick="renameTeam('${t.id}',document.getElementById('rename-${t.id}').value)">Rename</button>
         </div>
         <div class="member-chips">
-          ${(t.members || []).map(m => `
+          ${members.map(m => `
             <span class="chip">${m}<span class="chip-remove" onclick="removeMember('${t.id}','${m.replace(/'/g, "\\'")}')">×</span></span>
-          `).join('') || '<span style="font-size:12px;color:#98a2b3;">No members yet</span>'}
+          `).join('') || '<span style="font-size:12px;color:#98a2b3;">No members for this day</span>'}
         </div>
         <div class="add-member-row">
           <input type="text" id="wsearch-${t.id}" placeholder="Search worker…" oninput="filterW('${t.id}',this.value)" />
@@ -368,13 +423,15 @@ async function renderTeams() {
           </select>
           <button class="btn-add" onclick="addMember('${t.id}',document.getElementById('wsel-${t.id}').value||document.getElementById('wsearch-${t.id}').value)">Add</button>
         </div>
-      </div>`).join('') +
+      </div>`;
+      }).join('') +
       `<button class="btn-ghost" onclick="addTeam()">+ Add Team ${teams.length + 1}</button>`;
 
     window.renameTeam = renameTeam;
     window.addMember = addMember;
     window.removeMember = removeMember;
     window.addTeam = addTeam;
+    window.setRosterDate = (d) => { if (d) { rosterDate = d; renderCards(); } };
     window.filterW = (id, val) => {
       const s = document.getElementById(`wsel-${id}`); if (!s) return;
       const f = val ? workers.filter(w => w.name.toLowerCase().includes(val.toLowerCase())) : workers;
@@ -424,19 +481,21 @@ async function renderLog(days) {
 async function renderInventory() {
   const el = document.getElementById('inv-content');
   el.innerHTML = '<div class="state-msg">Loading…</div>';
-  const TODAY_STR = new Date().toISOString().slice(0, 10);
+  const TODAY_STR = TODAY;
   const monthStart = TODAY_STR.slice(0, 7) + '-01';
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
   const weekStr = weekAgo.toISOString().slice(0, 10);
 
-  const [lr, pr, tr, wr] = await Promise.all([
+  const [lr, pr, tr, wr, rosterRows, summaries] = await Promise.all([
     supabase.from('production_log').select('*').order('production_date').limit(50000),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*'),
     supabase.from('workers').select('name, daily_rate'),
+    fetchRosterRows(supabase),
+    fetchSummaries(supabase),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
-  const teamDays = buildTeamDays(logs, allTeams, wr.data || []);
+  const teamDays = buildTeamDays(logs, allTeams, wr.data || [], rosterRows, summaries);
   const overall = sumDays(teamDays);
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
   const teamMap = Object.fromEntries(allTeams.map(t => [t.id, t]));
@@ -459,22 +518,16 @@ async function renderInventory() {
     if (l.production_date === TODAY_STR) byProd[n].today += Number(l.quantity || 0);
   });
 
-  // By team — cost per kg
+  // By team — cost per kg for the SELECTED DAY only (wage of that day's team ÷ that day's weight)
   const byTeam = {};
-  logs.forEach(l => {
+  teamDays.filter(r => r.date === invDate).forEach(td => {
+    byTeam[td.team] = { qty: td.units, wt: td.weight, wage: td.wage, value: 0 };
+  });
+  logs.filter(l => l.production_date === invDate).forEach(l => {
     const t = teamMap[l.team_id];
     const tName = t?.name || 'Team ' + (t?.team_number || '—');
-    const p = prodMap[l.product_id];
-    const price = Number(p?.selling_price || 0);
-    const qty = Number(l.quantity || 0);
-    const wt = Number(l.weight || 0);
-    if (!byTeam[tName]) byTeam[tName] = { qty: 0, wt: 0, value: 0, wage: 0 };
-    byTeam[tName].qty += qty;
-    byTeam[tName].wt += wt;
-    byTeam[tName].value += qty * price;
+    if (byTeam[tName]) byTeam[tName].value += Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
   });
-
-  teamDays.forEach(td => { if (byTeam[td.team]) byTeam[td.team].wage += td.wage; });
 
   // Product chart data
   const prodLabels = Object.keys(byProd).slice(0, 10);
@@ -506,7 +559,7 @@ async function renderInventory() {
       <div class="tcstat"><span class="l">Total Wage (${OVERTIME_MULTIPLIER}x)</span><span class="v">₹${Math.round(v.wage).toLocaleString('en-IN')}</span></div>
       <div class="tcstat"><span class="l">Cost per kg</span><span class="v cpkg">${cpkg > 0 ? '₹' + Number(cpkg).toLocaleString('en-IN') : '—'}</span></div>
     </div>`;
-  }).join('') || '<div class="state-msg">No team data</div>';
+  }).join('') || '<div class="state-msg">No team produced anything on this date</div>';
 
   el.innerHTML = `
     <div class="inv-hero">
@@ -527,7 +580,8 @@ async function renderInventory() {
       <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
     </div>
 
-    <div class="section-head"><div class="section-title">Team Performance & Cost per Kg</div><div class="section-sub">Total wage ÷ Total weight produced · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
+    <div class="section-head"><div class="section-title">Team Cost per Kg — ${invDate === TODAY ? 'Today' : invDate}</div><div class="section-sub">That day's wage ÷ that day's weight · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
+    <div class="field" style="max-width:240px;margin-bottom:12px;"><label>📅 Date</label><input type="date" value="${invDate}" max="${TODAY}" onchange="setInvDate(this.value)" style="font-size:15px;padding:10px 12px;" /></div>
     <div class="team-cost-grid">${teamCards}</div>
 
     <div class="section-head"><div class="section-title">Charts</div></div>
@@ -537,7 +591,7 @@ async function renderInventory() {
         <canvas id="chart-prod"></canvas>
       </div>
       <div class="chart-card">
-        <h3>Cost per Kg by Team (₹) — wage ÷ weight</h3>
+        <h3>Cost per Kg by Team (₹) — ${invDate === TODAY ? 'today' : invDate}</h3>
         <canvas id="chart-cpkg"></canvas>
       </div>
     </div>
@@ -547,11 +601,17 @@ async function renderInventory() {
       <canvas id="chart-cpk-weight"></canvas>
     </div>
 
+    <div class="section-head"><div><div class="section-title">Monthly Record</div><div class="section-sub">Each day is saved automatically after 12:00 am and added to its month</div></div></div>
+    <div id="month-record"><div class="state-msg">Loading…</div></div>
+
     <div class="section-head"><div class="section-title">Product Breakdown</div></div>
     <div class="table-wrap"><table class="dt">
       <thead><tr><th>Product</th><th class="num">Today</th><th class="num">This Month</th><th class="num">All Time</th><th class="num">Weight (kg)</th><th class="num">Total Value</th></tr></thead>
       <tbody>${prodRows}</tbody>
     </table></div>`;
+
+  loadMonthly(supabase).then(r => { const m = document.getElementById('month-record'); if (m) m.innerHTML = monthlyTableHTML(r, 'dt'); }).catch(() => {});
+  window.setInvDate = (d) => { if (d) { invDate = d; renderInventory(); } };
 
   // Charts
   requestAnimationFrame(() => {
@@ -580,6 +640,7 @@ async function renderInventory() {
 
 // ── Init ──
 async function init() {
+  startAutoClose(supabase);
   await loadData();
   showPage('dashboard');
 }

@@ -1,11 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
-import { buildTeamDays, sumDays, costVsWeightChart, OVERTIME_MULTIPLIER } from '../../utils/cost.js';
+import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from '../../utils/cost.js';
+import { loadMonthly, monthlyTableHTML } from '../../utils/dayclose.js';
+import { fetchRosterRows } from '../../utils/roster.js';
 const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 let dashChannel = null;
 let cpkChart = null;
 
-const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+import { istToday } from '../../utils/roster.js';
 const inr = n => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 const fmtDate = s => { const [y, m, d] = s.split('-'); return `${+d} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1]} ${y}`; };
 
@@ -24,18 +26,25 @@ export async function renderDashboard(root) {
       <button class="range-btn" data-d="365">1 Year</button>
     </div>
     <div id="dash-days"></div>
+    <div class="section-head"><div><div class="section-title">Team-wise Cost per Kg (each day)</div><div class="section-sub">Each team's wage for that day ÷ that day's weight</div></div></div>
+    <div id="dash-teamdays"></div>
     <div class="section-head"><div><div class="section-title">Cost per Kg vs Weight</div><div class="section-sub">Each dot = one team's day · wage (daily rate × ${OVERTIME_MULTIPLIER}) ÷ weight produced</div></div></div>
     <div class="card" style="margin-bottom:20px;"><canvas id="dash-cpk-chart"></canvas></div>
+    <div class="section-head"><div><div class="section-title">Monthly Record</div><div class="section-sub">Each day is saved automatically after 12:00 am and added to its month</div></div></div>
+    <div id="dash-monthly"></div>
     <div class="section-head"><div class="section-title">Today by Product</div></div>
     <div id="dash-today"></div>`;
 
   async function load() {
     const from = new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
-    const [lr, pr, tr, wr] = await Promise.all([
+    const [lr, pr, tr, wr, rosters, allCost, summaries] = await Promise.all([
       supabase.from('production_log').select('*').gte('production_date', from).lte('production_date', TODAY).limit(20000),
       supabase.from('products').select('*'),
       supabase.from('teams').select('*'),
       supabase.from('workers').select('name, daily_rate'),
+      fetchRosterRows(supabase),
+      loadCostData(supabase),
+      fetchSummaries(supabase),
     ]);
     const logs = lr.data || [], prodMap = Object.fromEntries((pr.data || []).map(p => [p.id, p]));
     const value = l => Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
@@ -45,7 +54,7 @@ export async function renderDashboard(root) {
     const tUnits = tl.reduce((s, l) => s + Number(l.quantity || 0), 0);
     const tWt = tl.reduce((s, l) => s + Number(l.weight || 0), 0);
     const tVal = tl.reduce((s, l) => s + value(l), 0);
-    const teamDays = buildTeamDays(logs, tr.data || [], wr.data || []);
+    const teamDays = buildTeamDays(logs, tr.data || [], wr.data || [], rosters, summaries);
     const tCost = sumDays(teamDays.filter(r => r.date === TODAY));
     const active = new Set(tl.map(l => l.team_id)).size;
     root.querySelector('#dash-kpis').innerHTML = `
@@ -54,6 +63,7 @@ export async function renderDashboard(root) {
         <div class="kpi-card" style="--accent-color:var(--green)"><div class="kpi-icon">💰</div><div class="kpi-label">Value Today</div><div class="kpi-value">${inr(tVal)}</div><div class="kpi-sub">at selling price</div></div>
         <div class="kpi-card" style="--accent-color:var(--orange)"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight Today</div><div class="kpi-value">${tWt.toFixed(1)}</div><div class="kpi-sub">Kilograms</div></div>
         <div class="kpi-card" style="--accent-color:var(--red)"><div class="kpi-icon">🧮</div><div class="kpi-label">Cost per kg Today</div><div class="kpi-value">${tCost.cpk > 0 ? '₹' + tCost.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ${inr(tCost.wage)} ÷ ${tWt.toFixed(1)} kg</div></div>
+        <div class="kpi-card" style="--accent-color:var(--red)"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Cost per kg</div><div class="kpi-value">${allCost.overall.cpk > 0 ? '₹' + allCost.overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ${inr(allCost.overall.wage)} ÷ ${Math.round(allCost.overall.weight).toLocaleString('en-IN')} kg</div></div>
         <div class="kpi-card" style="--accent-color:var(--purple)"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${active}</div><div class="kpi-sub">of ${(tr.data || []).length} total</div></div>
       </div>`;
 
@@ -71,10 +81,20 @@ export async function renderDashboard(root) {
       ${dayKeys.length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Total (${dayKeys.length} days)</td><td class="num">${tot.u.toLocaleString('en-IN')}</td><td class="num">${tot.w.toFixed(1)} kg</td><td class="num">${inr(tot.v)}</td><td class="num">${inr(tot.g)}</td><td class="num">${tot.w > 0 ? '₹' + (tot.g / tot.w).toFixed(2) : '—'}</td></tr></tfoot>` : ''}
     </table></div>`;
 
+    // team-wise cost per kg for each day
+    const tdRows = [...teamDays].sort((a, b) => (a.date === b.date ? a.team.localeCompare(b.team) : b.date.localeCompare(a.date)))
+      .map(r => `<tr><td>${fmtDate(r.date)}</td><td class="bold">${r.team}</td><td class="num">${r.units.toLocaleString('en-IN')}</td><td class="num">${r.weight.toFixed(1)} kg</td><td class="num">${inr(r.wage)}</td><td class="num" style="font-weight:600;">${r.weight > 0 ? '₹' + r.cpk.toFixed(2) : '—'}</td></tr>`).join('')
+      || '<tr><td colspan="6" style="text-align:center;color:var(--ink-dim);padding:20px;">No production in this period</td></tr>';
+    root.querySelector('#dash-teamdays').innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th>Team</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Wage</th><th class="num">Cost/kg</th></tr></thead>
+      <tbody>${tdRows}</tbody></table></div>`;
+
     // cost per kg vs weight chart
     if (cpkChart) { cpkChart.destroy(); cpkChart = null; }
     const cv = root.querySelector('#dash-cpk-chart');
     if (cv && teamDays.length && window.Chart) cpkChart = new window.Chart(cv, costVsWeightChart(teamDays));
+
+    loadMonthly(supabase).then(r => { const m = root.querySelector('#dash-monthly'); if (m) m.innerHTML = monthlyTableHTML(r, 'data-table'); }).catch(() => {});
 
     // today by product
     const byProd = {};

@@ -1,4 +1,6 @@
 import './styles/base.css';
+import { supabase as ownerSupabase } from './services/supabaseClient.js';
+import { startAutoClose } from './utils/dayclose.js';
 import './styles/owner.css';
 import { renderDashboard } from './pages/owner/dashboard.js';
 import { renderProductionLog } from './pages/owner/productionLog.js';
@@ -56,3 +58,5 @@ async function navigate(route) {
 
 window.addEventListener('hashchange', () => navigate(getRoute()));
 navigate(getRoute());
+
+startAutoClose(ownerSupabase);
