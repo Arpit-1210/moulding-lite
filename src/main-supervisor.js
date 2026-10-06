@@ -16,6 +16,7 @@ let teams = [], products = [], workers = [], todayLogs = [];
 let currentPage = 'dashboard';
 const TODAY = istToday();
 let invDate = TODAY;
+let logDays = 0;
 
 // ── Toast ──
 function toast(msg, type = 'success') {
@@ -321,9 +322,15 @@ function renderTodayLog() {
         <div class="log-prod-name">${prodMap[l.product_id]?.name || '—'}</div>
         <div class="log-prod-meta">${teamMap[l.team_id]?.name || 'Team ' + (teamMap[l.team_id]?.team_number || '—')} · ${l.production_time || ''}</div>
       </div>
-      <div style="text-align:right;">
-        <div class="log-prod-qty">${l.quantity}</div>
-        <div class="log-prod-wt">${l.weight} kg</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="text-align:right;">
+          <div class="log-prod-qty">${l.quantity}</div>
+          <div class="log-prod-wt">${l.weight} kg</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button onclick="editEntry('${l.id}')" style="border:1px solid #d0d5dd;background:#fff;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">✏️</button>
+          <button onclick="deleteEntry('${l.id}')" style="border:1px solid #fecaca;background:#fff;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">🗑️</button>
+        </div>
       </div>
     </div>`).join('');
 }
@@ -443,6 +450,7 @@ async function renderTeams() {
 
 // ── History ──
 async function renderLog(days) {
+  logDays = days;
   const el = document.getElementById('log-content');
   el.innerHTML = '<div class="state-msg">Loading…</div>';
   const from = new Date(); if (days > 0) from.setDate(from.getDate() - days);
@@ -463,8 +471,9 @@ async function renderLog(days) {
     <td class="bold">${prodMap[l.product_id]?.name || '—'}</td>
     <td class="num">${l.quantity}</td>
     <td class="num">${Number(l.weight).toFixed(1)}</td>
-    <td style="color:#667085;font-size:12px;">${l.production_time || ''}</td>
-  </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#667085;">No entries</td></tr>';
+ <td style="color:#667085;font-size:12px;">${l.production_time || ''}</td>
+    <td style="white-space:nowrap;"><button onclick="editEntry('${l.id}')" style="border:1px solid #d0d5dd;background:#fff;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">✏️</button> <button onclick="deleteEntry('${l.id}')" style="border:1px solid #fecaca;background:#fff;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;">🗑️</button></td>
+  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#667085;">No entries</td></tr>';
   el.innerHTML = `
     <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px;">
       <div class="kpi-card"><div class="kpi-label">Total Units</div><div class="kpi-value">${totalU}</div></div>
@@ -472,10 +481,69 @@ async function renderLog(days) {
       <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${logs.length}</div></div>
     </div>
     <div class="table-wrap"><table class="dt">
-      <thead><tr><th>Date</th><th>Team</th><th>Product</th><th class="num">Qty</th><th class="num">Weight</th><th>Time</th></tr></thead>
+      <thead><tr><th>Date</th><th>Team</th><th>Product</th><th class="num">Qty</th><th class="num">Weight</th><th>Time</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
 }
+
+// ── Edit / delete a logged entry ──
+async function refreshAfterEntryChange(date) {
+  if (date < TODAY) { try { await closeDays(supabase, [date]); } catch (e) { console.warn(e.message); } }
+  if (currentPage === 'log') { await renderLog(logDays); }
+  else if (currentPage === 'production') {
+    const d = document.getElementById('prod-date')?.value || TODAY;
+    await loadLogsForDate(d); updateKPIs(); renderTodayLog();
+  }
+}
+
+window.editEntry = async (id) => {
+  const { data: e, error } = await supabase.from('production_log').select('*').eq('id', id).single();
+  if (error || !e) { toast('Could not load entry', 'error'); return; }
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+  const opts = products.map(p => `<option value="${p.id}" ${String(p.id) === String(e.product_id) ? 'selected' : ''}>${p.name}</option>`).join('');
+  ov.innerHTML = `
+    <div style="background:#fff;border-radius:14px;padding:18px;width:100%;max-width:380px;">
+      <div style="font-weight:700;font-size:16px;margin-bottom:4px;">Edit entry</div>
+      <div style="font-size:12px;color:#667085;margin-bottom:14px;">${e.production_date} · ${e.production_time || ''}</div>
+      <div class="field"><label>Product</label><select id="ee-prod">${opts}</select></div>
+      <div class="field-row">
+        <div class="field" style="margin-bottom:0;"><label>Quantity (pcs)</label><input type="number" id="ee-qty" inputmode="numeric" value="${e.quantity}" min="1" /></div>
+        <div class="field" style="margin-bottom:0;"><label>Weight (kg)</label><input type="number" id="ee-wt" inputmode="decimal" step="0.1" value="${e.weight}" /></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <button id="ee-cancel" style="flex:1;border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:12px;font-size:14px;cursor:pointer;">Cancel</button>
+        <button id="ee-save" class="btn-primary" style="flex:1;">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#ee-cancel').onclick = () => ov.remove();
+  ov.addEventListener('click', ev => { if (ev.target === ov) ov.remove(); });
+  ov.querySelector('#ee-save').onclick = async () => {
+    const qty = parseFloat(ov.querySelector('#ee-qty').value);
+    const wt = parseFloat(ov.querySelector('#ee-wt').value);
+    if (!qty || qty <= 0) { toast('Enter quantity', 'error'); return; }
+    if (!wt || wt <= 0) { toast('Enter weight', 'error'); return; }
+    const btn = ov.querySelector('#ee-save'); btn.disabled = true; btn.textContent = 'Saving…';
+    const { data: upd, error: err0 } = await supabase.from('production_log')
+      .update({ product_id: ov.querySelector('#ee-prod').value, quantity: qty, weight: wt }).eq('id', id).select();
+    const err = err0 || ((upd || []).length ? null : { message: 'not allowed yet — run production_edit.sql in Supabase' });
+    if (err) { toast('Save failed: ' + err.message, 'error'); btn.disabled = false; btn.textContent = 'Save'; return; }
+    ov.remove();
+    await refreshAfterEntryChange(e.production_date);
+    toast('Entry updated ✓');
+  };
+};
+
+window.deleteEntry = async (id) => {
+  const { data: e } = await supabase.from('production_log').select('production_date').eq('id', id).single();
+  if (!confirm('Delete this entry? This cannot be undone.')) return;
+  const { data: del, error: err0 } = await supabase.from('production_log').delete().eq('id', id).select();
+  const error = err0 || ((del || []).length ? null : { message: 'not allowed yet — run production_edit.sql in Supabase' });
+  if (error) { toast('Delete failed: ' + error.message, 'error'); return; }
+  await refreshAfterEntryChange(e?.production_date || TODAY);
+  toast('Entry deleted');
+};
 
 // ── Inventory ──
 async function renderInventory() {
