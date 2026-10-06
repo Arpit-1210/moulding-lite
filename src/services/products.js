@@ -11,3 +11,9 @@ export async function upsertProduct(product) {
   if (error) throw error;
   return data;
 }
+
+export async function addProduct(product) {
+  const { data, error } = await supabase.from('products').insert([{ ...product, active: true }]).select().single();
+  if (error) throw error;
+  return data;
+}

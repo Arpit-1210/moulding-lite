@@ -1,7 +1,6 @@
 import { fetchProductionByRange } from '../../services/production.js';
 import { fetchProducts } from '../../services/products.js';
 import { fetchTeamsAll } from '../../services/teams.js';
-import { fetchActiveSupervisors } from '../../services/supervisors.js';
 
 export async function renderProductionLog(root) {
   root.innerHTML = `
@@ -25,17 +24,14 @@ export async function renderProductionLog(root) {
     const fromStr = from.toISOString().slice(0,10);
     const toStr = new Date().toISOString().slice(0,10);
 
-    const [logs, products, teams, supervisors] = await Promise.all([
+    const [logs, products, teams] = await Promise.all([
       fetchProductionByRange(fromStr, toStr),
       fetchProducts(),
       fetchTeamsAll(),
-      fetchActiveSupervisors(),
     ]);
 
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const teamMap = Object.fromEntries(teams.map(t => [t.id, t]));
-    const supMap = Object.fromEntries(supervisors.map(s => [s.id, s]));
-    const teamSupMap = Object.fromEntries(teams.map(t => [t.id, t.supervisor_id]));
 
     const totalUnits = logs.reduce((s,l)=>s+Number(l.quantity||0),0);
     const totalWeight = logs.reduce((s,l)=>s+Number(l.weight||0),0);
@@ -43,18 +39,15 @@ export async function renderProductionLog(root) {
     const rows = logs.map(l => {
       const prod = prodMap[l.product_id];
       const team = teamMap[l.team_id];
-      const supId = teamSupMap[l.team_id];
-      const sup = supMap[supId];
       return `<tr>
         <td>${l.production_date}</td>
-        <td>${sup?.name||'—'}</td>
-        <td>Team ${team?.team_number||'—'}</td>
+        <td>${team?.name||'Team '+(team?.team_number||'—')}</td>
         <td class="bold">${prod?.name||'—'}</td>
         <td class="num">${l.quantity}</td>
         <td class="num">${Number(l.weight).toFixed(1)} kg</td>
         <td style="color:var(--ink-dim);font-size:12px;">${l.production_time||''}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--ink-dim);">No entries in this period</td></tr>';
+    }).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--ink-dim);">No entries in this period</td></tr>';
 
     logContent.innerHTML = `
       <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">
@@ -64,7 +57,7 @@ export async function renderProductionLog(root) {
       </div>
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>Date</th><th>Supervisor</th><th>Team</th><th>Product</th><th class="num">Qty</th><th class="num">Weight</th><th>Time</th></tr></thead>
+          <thead><tr><th>Date</th><th>Team</th><th>Product</th><th class="num">Qty</th><th class="num">Weight</th><th>Time</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>

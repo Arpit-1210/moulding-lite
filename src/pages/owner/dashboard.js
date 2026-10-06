@@ -3,67 +3,85 @@ const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env
 
 let dashChannel = null;
 
+const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+const inr = n => '₹' + Math.round(n || 0).toLocaleString('en-IN');
+const fmtDate = s => { const [y, m, d] = s.split('-'); return `${+d} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1]} ${y}`; };
+
 export async function renderDashboard(root) {
-  const TODAY = new Date().toISOString().slice(0,10);
-
-  // Remove old channel
   if (dashChannel) { supabase.removeChannel(dashChannel); dashChannel = null; }
-
-  const [lr, pr, sr, tr] = await Promise.all([
-    supabase.from('production_log').select('*').eq('production_date', TODAY),
-    supabase.from('products').select('*').eq('active', true),
-    supabase.from('supervisors').select('*').eq('active', true),
-    supabase.from('teams').select('*'),
-  ]);
-
-  const logs=lr.data||[], prods=pr.data||[], sups=sr.data||[], allTeams=tr.data||[];
-  const prodMap=Object.fromEntries(prods.map(p=>[p.id,p]));
-  const totalUnits=logs.reduce((s,l)=>s+Number(l.quantity||0),0);
-  const totalWeight=logs.reduce((s,l)=>s+Number(l.weight||0),0);
-  const activeTeams=[...new Set(logs.map(l=>l.team_id))].length;
-
-  const byProd={};
-  logs.forEach(l=>{ const n=prodMap[l.product_id]?.name||'—'; if(!byProd[n]) byProd[n]={qty:0,wt:0}; byProd[n].qty+=Number(l.quantity||0); byProd[n].wt+=Number(l.weight||0); });
-
-  const supCards=sups.map(s=>{
-    const sTeams=allTeams.filter(t=>t.supervisor_id===s.id);
-    const sLogs=logs.filter(l=>sTeams.some(t=>t.id===l.team_id));
-    const sUnits=sLogs.reduce((a,l)=>a+Number(l.quantity||0),0);
-    const sWt=sLogs.reduce((a,l)=>a+Number(l.weight||0),0);
-    return `<div class="team-prod-card" style="border-left-color:${sUnits>0?'var(--green)':'var(--border-strong)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <h3>${s.name}</h3>
-        <span class="badge ${sUnits>0?'badge-green':''}" style="${!sUnits?'background:var(--bg);color:var(--ink-faint);':''}">${sUnits>0?'● Active':'Idle'}</span>
-      </div>
-      <div class="team-prod-stat"><span class="label">Teams</span><span class="value">${sTeams.length}</span></div>
-      <div class="team-prod-stat"><span class="label">Units</span><span class="value" style="color:var(--primary)">${sUnits}</span></div>
-      <div class="team-prod-stat"><span class="label">Weight</span><span class="value">${sWt.toFixed(1)} kg</span></div>
-      <div class="team-prod-stat"><span class="label">Entries</span><span class="value">${sLogs.length}</span></div>
-    </div>`;
-  }).join('')||'<div class="state-msg">No supervisors</div>';
-
-  const prodRows=Object.entries(byProd).sort((a,b)=>b[1].qty-a[1].qty)
-    .map(([n,v])=>`<tr><td class="bold">${n}</td><td class="num">${v.qty}</td><td class="num">${v.wt.toFixed(1)} kg</td></tr>`)
-    .join('')||'<tr><td colspan="3" style="text-align:center;color:var(--ink-dim);padding:20px;">No production today</td></tr>';
+  const TODAY = istToday();
+  let days = 30;
 
   root.innerHTML = `
-    <div class="kpi-grid">
-      <div class="kpi-card" style="--accent-color:var(--primary)"><div class="kpi-icon">🏭</div><div class="kpi-label">Units Today</div><div class="kpi-value">${totalUnits}</div><div class="kpi-sub">${logs.length} entries</div></div>
-      <div class="kpi-card" style="--accent-color:var(--green)"><div class="kpi-icon">⚖️</div><div class="kpi-label">Total Weight</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">Kilograms</div></div>
-      <div class="kpi-card" style="--accent-color:var(--orange)"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${allTeams.length} total</div></div>
-      <div class="kpi-card" style="--accent-color:var(--purple)"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made today</div></div>
+    <div id="dash-kpis"></div>
+    <div class="section-head"><div><div class="section-title">Day-wise Production</div><div class="section-sub">Units made and production value per day</div></div><span class="badge badge-green" id="live-badge">● Live</span></div>
+    <div class="range-bar">
+      <button class="range-btn" data-d="7">7 Days</button>
+      <button class="range-btn active" data-d="30">30 Days</button>
+      <button class="range-btn" data-d="90">3 Months</button>
+      <button class="range-btn" data-d="365">1 Year</button>
     </div>
-    <div class="section-head"><div><div class="section-title">By Supervisor</div><div class="section-sub">Live status</div></div><span class="badge badge-green" id="live-badge">● Live</span></div>
-    <div class="team-prod-grid">${supCards}</div>
+    <div id="dash-days"></div>
     <div class="section-head"><div class="section-title">Today by Product</div></div>
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Product</th><th class="num">Units</th><th class="num">Weight</th></tr></thead>
-      <tbody>${prodRows}</tbody>
+    <div id="dash-today"></div>`;
+
+  async function load() {
+    const from = new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
+    const [lr, pr, tr] = await Promise.all([
+      supabase.from('production_log').select('*').gte('production_date', from).lte('production_date', TODAY).limit(20000),
+      supabase.from('products').select('*'),
+      supabase.from('teams').select('id'),
+    ]);
+    const logs = lr.data || [], prodMap = Object.fromEntries((pr.data || []).map(p => [p.id, p]));
+    const value = l => Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
+
+    // today KPIs
+    const tl = logs.filter(l => l.production_date === TODAY);
+    const tUnits = tl.reduce((s, l) => s + Number(l.quantity || 0), 0);
+    const tWt = tl.reduce((s, l) => s + Number(l.weight || 0), 0);
+    const tVal = tl.reduce((s, l) => s + value(l), 0);
+    const active = new Set(tl.map(l => l.team_id)).size;
+    root.querySelector('#dash-kpis').innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi-card" style="--accent-color:var(--primary)"><div class="kpi-icon">🏭</div><div class="kpi-label">Units Today</div><div class="kpi-value">${tUnits.toLocaleString('en-IN')}</div><div class="kpi-sub">${tl.length} entries</div></div>
+        <div class="kpi-card" style="--accent-color:var(--green)"><div class="kpi-icon">💰</div><div class="kpi-label">Value Today</div><div class="kpi-value">${inr(tVal)}</div><div class="kpi-sub">at selling price</div></div>
+        <div class="kpi-card" style="--accent-color:var(--orange)"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight Today</div><div class="kpi-value">${tWt.toFixed(1)}</div><div class="kpi-sub">Kilograms</div></div>
+        <div class="kpi-card" style="--accent-color:var(--purple)"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${active}</div><div class="kpi-sub">of ${(tr.data || []).length} total</div></div>
+      </div>`;
+
+    // day-wise
+    const byDay = {};
+    logs.forEach(l => { const d = byDay[l.production_date] ||= { u: 0, w: 0, v: 0, n: 0 }; d.u += Number(l.quantity || 0); d.w += Number(l.weight || 0); d.v += value(l); d.n++; });
+    const dayKeys = Object.keys(byDay).sort().reverse();
+    const tot = dayKeys.reduce((a, k) => ({ u: a.u + byDay[k].u, w: a.w + byDay[k].w, v: a.v + byDay[k].v }), { u: 0, w: 0, v: 0 });
+    const dRows = dayKeys.map(k => `<tr><td class="bold">${fmtDate(k)}</td><td class="num">${byDay[k].u.toLocaleString('en-IN')}</td><td class="num">${byDay[k].w.toFixed(1)} kg</td><td class="num" style="color:var(--green);font-weight:600;">${inr(byDay[k].v)}</td></tr>`).join('')
+      || '<tr><td colspan="4" style="text-align:center;color:var(--ink-dim);padding:20px;">No production in this period</td></tr>';
+    root.querySelector('#dash-days').innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Value</th></tr></thead>
+      <tbody>${dRows}</tbody>
+      ${dayKeys.length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Total (${dayKeys.length} days)</td><td class="num">${tot.u.toLocaleString('en-IN')}</td><td class="num">${tot.w.toFixed(1)} kg</td><td class="num">${inr(tot.v)}</td></tr></tfoot>` : ''}
     </table></div>`;
 
-  // Live subscription with unique channel name
+    // today by product
+    const byProd = {};
+    tl.forEach(l => { const n = prodMap[l.product_id]?.name || '—'; const p = byProd[n] ||= { q: 0, w: 0, v: 0 }; p.q += Number(l.quantity || 0); p.w += Number(l.weight || 0); p.v += value(l); });
+    const pRows = Object.entries(byProd).sort((a, b) => b[1].q - a[1].q).map(([n, v]) => `<tr><td class="bold">${n}</td><td class="num">${v.q}</td><td class="num">${v.w.toFixed(1)} kg</td><td class="num">${inr(v.v)}</td></tr>`).join('')
+      || '<tr><td colspan="4" style="text-align:center;color:var(--ink-dim);padding:20px;">No production today</td></tr>';
+    root.querySelector('#dash-today').innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Product</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Value</th></tr></thead><tbody>${pRows}</tbody></table></div>`;
+  }
+
+  root.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
+    root.querySelectorAll('.range-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); days = +b.dataset.d; load();
+  }));
+
+  await load();
+
   dashChannel = supabase.channel(`owner-dash-${Date.now()}`)
-    .on('postgres_changes', { event:'INSERT', schema:'public', table:'production_log', filter:`production_date=eq.${TODAY}` },
-      () => { const b=document.getElementById('live-badge'); if(b){b.textContent='● Updated'; setTimeout(()=>b.textContent='● Live',2000);} renderDashboard(root); })
-    .subscribe();
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'production_log' }, () => {
+      const b = document.getElementById('live-badge');
+      if (b) { b.textContent = '● Updated'; setTimeout(() => { b.textContent = '● Live'; }, 2000); }
+      load();
+    }).subscribe();
 }
