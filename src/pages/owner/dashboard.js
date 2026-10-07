@@ -2,6 +2,7 @@ import { supabase } from '../../services/supabaseClient.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from '../../utils/cost.js';
 import { loadMonthly, monthlyTableHTML } from '../../utils/dayclose.js';
 import { fetchRosterRows } from '../../utils/roster.js';
+import { entryValue } from '../../utils/value.js';
 
 let dashChannel = null;
 let cpkChart = null;
@@ -48,7 +49,7 @@ export async function renderDashboard(root) {
       fetchSummaries(supabase),
     ]);
     const logs = lr.data || [], prodMap = Object.fromEntries((pr.data || []).map(p => [p.id, p]));
-    const value = l => Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
+    const value = l => entryValue(l.quantity, l.weight, prodMap[l.product_id]);
 
     // today KPIs
     const tl = logs.filter(l => l.production_date === TODAY);

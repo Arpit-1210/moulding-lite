@@ -30,7 +30,7 @@ export function createProductCombobox(products, { onSelect, placeholder = 'Searc
         .slice(0, 30)
         .map(
           (p) =>
-            `<div class="combobox-option" data-id="${p.id}">${escapeHtml(p.name)}<span class="price"> · ${formatRupees(p.selling_price)}/unit</span></div>`
+            `<div class="combobox-option" data-id="${p.id}">${escapeHtml(p.name)}<span class="price"> · ${formatRupees(p.selling_price)}/${p.pricing_unit === 'kg' ? 'kg' : 'unit'}</span></div>`
         )
         .join('');
     }

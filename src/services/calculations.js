@@ -9,6 +9,8 @@
 //   Profit             = Production Value − RM Cost − Wage Cost
 //   Margin             = Profit / Production Value × 100
 
+import { entryValue } from '../utils/value.js';
+
 export function lineValue(quantity, sellingPrice) {
   return Number(quantity || 0) * Number(sellingPrice || 0);
 }
@@ -52,7 +54,7 @@ export function summarize(rows, teamDailyWageTotals) {
     const qty = Number(row.quantity) || 0;
     units += qty;
     weight += Number(row.weight) || 0;
-    value += lineValue(qty, row.products?.selling_price);
+    value += entryValue(qty, row.weight, row.products);
     rmCost += lineRmCost(qty, row.products?.rm_cost);
   }
 
@@ -71,7 +73,7 @@ export function groupByProduct(rows) {
     const qty = Number(row.quantity) || 0;
     entry.units += qty;
     entry.weight += Number(row.weight) || 0;
-    entry.value += lineValue(qty, row.products?.selling_price);
+    entry.value += entryValue(qty, row.weight, row.products);
     entry.rmCost += lineRmCost(qty, row.products?.rm_cost);
     map.set(name, entry);
   }
@@ -103,7 +105,7 @@ export function groupByTeam(rows, teamDailyWageTotals) {
     const qty = Number(row.quantity) || 0;
     entry.units += qty;
     entry.weight += Number(row.weight) || 0;
-    entry.value += lineValue(qty, row.products?.selling_price);
+    entry.value += entryValue(qty, row.weight, row.products);
     entry.rmCost += lineRmCost(qty, row.products?.rm_cost);
     entry.days.add(row.production_date);
     map.set(key, entry);

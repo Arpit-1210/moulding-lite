@@ -4,6 +4,7 @@
 // multiplier or a worker's rate later never changes finished days.
 import { buildTeamDays, sumDays, fetchSummaries, OVERTIME_MULTIPLIER } from './cost.js';
 import { istToday, fetchRosterRows } from './roster.js';
+import { entryValue } from './value.js';
 
 const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
 
@@ -14,16 +15,16 @@ export async function closeDays(supabase, dates) {
       supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').in('production_date', part).limit(50000),
       supabase.from('teams').select('*'),
       supabase.from('workers').select('name, daily_rate'),
-      supabase.from('products').select('id, selling_price'),
+      supabase.from('products').select('id, selling_price, pricing_unit'),
       fetchRosterRows(supabase),
     ]);
     const logs = lr.data || [];
-    const price = new Map((pr.data || []).map(p => [p.id, Number(p.selling_price || 0)]));
+    const price = new Map((pr.data || []).map(p => [p.id, p]));
     const teamDays = buildTeamDays(logs, tr.data || [], wr.data || [], rosters); // live wage, no frozen
     const rows = part.map(d => {
       const td = teamDays.filter(r => r.date === d);
       const t = sumDays(td);
-      const value = logs.filter(l => l.production_date === d).reduce((s, l) => s + Number(l.quantity || 0) * (price.get(l.product_id) || 0), 0);
+      const value = logs.filter(l => l.production_date === d).reduce((s, l) => s + entryValue(l.quantity, l.weight, price.get(l.product_id)), 0);
       return {
         summary_date: d, units: t.units, weight: t.weight, value, wage: t.wage, multiplier: OVERTIME_MULTIPLIER,
         teams: td.map(r => ({ team_id: String(r.teamId), team: r.team, units: r.units, weight: r.weight, wage: r.wage })),
@@ -66,7 +67,7 @@ export async function loadMonthly(supabase) {
   const [summaries, lr, pr, tr, wr, rosters] = await Promise.all([
     fetchSummaries(supabase),
     supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').eq('production_date', today).limit(5000),
-    supabase.from('products').select('id, selling_price'),
+    supabase.from('products').select('id, selling_price, pricing_unit'),
     supabase.from('teams').select('*'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
@@ -81,9 +82,9 @@ export async function loadMonthly(supabase) {
   for (const s of summaries) if (s.summary_date < today) add(s.summary_date, Number(s.units), Number(s.weight), Number(s.value), Number(s.wage));
   const logs = lr.data || [];
   if (logs.length) {
-    const price = new Map((pr.data || []).map(p => [p.id, Number(p.selling_price || 0)]));
+    const price = new Map((pr.data || []).map(p => [p.id, p]));
     const t = sumDays(buildTeamDays(logs, tr.data || [], wr.data || [], rosters));
-    add(today, t.units, t.weight, logs.reduce((s, l) => s + Number(l.quantity || 0) * (price.get(l.product_id) || 0), 0), t.wage);
+    add(today, t.units, t.weight, logs.reduce((s, l) => s + entryValue(l.quantity, l.weight, price.get(l.product_id)), 0), t.wage);
   }
   return [...months.values()].sort((a, b) => b.month.localeCompare(a.month))
     .map(m => ({ ...m, days: m.dates.size, cpk: m.weight > 0 ? m.wage / m.weight : 0 }));

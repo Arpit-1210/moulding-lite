@@ -14,7 +14,7 @@ export async function fetchProductionRows({ from, to }) {
       `
       id, quantity, weight, production_date, production_time, created_at,
       teams ( id, team_number, supervisor_id, supervisors ( id, name ) ),
-      products ( id, name, selling_price, rm_cost )
+      products ( id, name, selling_price, rm_cost, pricing_unit )
     `
     )
     .gte('production_date', from)

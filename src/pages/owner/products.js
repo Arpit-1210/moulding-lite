@@ -8,9 +8,10 @@ export async function renderProducts(root) {
       <tr>
         <td><input type="text" class="name-input" data-id="${p.id}" value="${p.name.replace(/"/g, '&quot;')}" style="width:100%;min-width:150px;border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:13px;font-weight:600;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="selling_price" value="${p.selling_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
+        <td><select class="unit-select" data-id="${p.id}" style="border:1px solid var(--border);border-radius:4px;padding:5px 6px;font-size:13px;"><option value="unit" ${p.pricing_unit!=='kg'?'selected':''}>per unit</option><option value="kg" ${p.pricing_unit==='kg'?'selected':''}>per kg</option></select></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="cost_price" value="${p.cost_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td><span class="badge ${p.active?'badge-green':''}"> ${p.active?'Active':'Inactive'}</span></td>
-      </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
 
     document.getElementById('products-table-body').innerHTML = rows;
 
@@ -34,6 +35,19 @@ export async function renderProducts(root) {
       });
     });
 
+    document.querySelectorAll('.unit-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const msg = document.getElementById('np-msg');
+        const prod = products.find(p => String(p.id) === String(sel.dataset.id));
+        if (!prod) return;
+        try {
+          await upsertProduct({ id: prod.id, pricing_unit: sel.value });
+          prod.pricing_unit = sel.value;
+          msg.style.color = 'var(--green)'; msg.textContent = `"${prod.name}" is now priced ${sel.value === 'kg' ? 'per kg' : 'per unit'}`;
+        } catch (e) { sel.value = prod.pricing_unit || 'unit'; msg.style.color = 'var(--red)'; msg.textContent = 'Could not change: ' + e.message + ' (run product_pricing_unit.sql in Supabase)'; }
+      });
+    });
+
     // Auto-save on price change
     document.querySelectorAll('.price-input').forEach(input => {
       input.addEventListener('change', async () => {
@@ -54,7 +68,7 @@ export async function renderProducts(root) {
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
         <div class="section-title">Product Catalogue</div>
-        <div class="section-sub" style="margin-top:2px;">${products.length} products · Prices set here are used for production value</div>
+        <div class="section-sub" style="margin-top:2px;">${products.length} products · Prices set here are used for production value (per unit = quantity × price, per kg = weight × price)</div>
       </div>
     </div>
     <div class="card" style="margin-bottom:16px;">
@@ -62,6 +76,7 @@ export async function renderProducts(root) {
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
         <input id="np-name" placeholder="Product name" style="flex:2;min-width:160px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
         <input id="np-sell" type="number" placeholder="Selling price ₹" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
+        <select id="np-unit" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;"><option value="unit">Price per unit</option><option value="kg">Price per kg</option></select>
         <input id="np-cost" type="number" placeholder="Cost price ₹ (optional)" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
         <button id="np-add" style="background:var(--primary);color:#fff;border:0;border-radius:6px;padding:9px 18px;font-weight:600;font-size:14px;cursor:pointer;">Add</button>
       </div>
@@ -69,7 +84,7 @@ export async function renderProducts(root) {
     </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
+        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
         <tbody id="products-table-body"></tbody>
       </table>
     </div>
@@ -88,6 +103,7 @@ export async function renderProducts(root) {
         name,
         selling_price: parseFloat(document.getElementById('np-sell').value) || 0,
         cost_price: parseFloat(document.getElementById('np-cost').value) || 0,
+        pricing_unit: document.getElementById('np-unit').value,
       });
       products = [...products, p].sort((a, b) => a.name.localeCompare(b.name));
       ['np-name', 'np-sell', 'np-cost'].forEach(i => { document.getElementById(i).value = ''; });

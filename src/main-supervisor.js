@@ -2,6 +2,7 @@
 import './styles/base.css';
 import { supabase } from './services/supabaseClient.js';
 import { requireLogin } from './utils/auth.js';
+import { entryValue } from './utils/value.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from './utils/cost.js';
 import { startAutoClose, closeDays, loadMonthly, monthlyTableHTML } from './utils/dayclose.js';
 import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster } from './utils/roster.js';
@@ -571,9 +572,10 @@ async function renderInventory() {
   logs.forEach(l => {
     const p = prodMap[l.product_id];
     const n = p?.name || 'Unknown';
-    if (!byProd[n]) byProd[n] = { qty: 0, month: 0, today: 0, wt: 0, price: Number(p?.selling_price || 0) };
+    if (!byProd[n]) byProd[n] = { qty: 0, month: 0, today: 0, wt: 0, price: Number(p?.selling_price || 0), val: 0, kg: p?.pricing_unit === 'kg' };
     byProd[n].qty += Number(l.quantity || 0);
     byProd[n].wt += Number(l.weight || 0);
+    byProd[n].val += entryValue(l.quantity, l.weight, p);
     if (l.production_date >= monthStart) byProd[n].month += Number(l.quantity || 0);
     if (l.production_date === SEL) byProd[n].today += Number(l.quantity || 0);
   });
@@ -586,7 +588,7 @@ async function renderInventory() {
   logs.filter(l => l.production_date === SEL).forEach(l => {
     const t = teamMap[l.team_id];
     const tName = t?.name || 'Team ' + (t?.team_number || '—');
-    if (byTeam[tName]) byTeam[tName].value += Number(l.quantity || 0) * Number(prodMap[l.product_id]?.selling_price || 0);
+    if (byTeam[tName]) byTeam[tName].value += entryValue(l.quantity, l.weight, prodMap[l.product_id]);
   });
 
   // Product chart data
@@ -605,7 +607,7 @@ async function renderInventory() {
       <td class="num">${v.month}</td>
       <td class="num">${v.qty}</td>
       <td class="num">${v.wt.toFixed(1)}</td>
-      <td class="num">${v.price > 0 ? '₹' + (v.qty * v.price).toLocaleString('en-IN') : '—'}</td>
+      <td class="num">${v.val > 0 ? '₹' + Math.round(v.val).toLocaleString('en-IN') : '—'}</td>
     </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:#667085;">No data</td></tr>';
 
   // Team cost cards
