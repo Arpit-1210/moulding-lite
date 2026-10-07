@@ -1,14 +1,11 @@
 // v2.1 - date picker added
 import './styles/base.css';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './services/supabaseClient.js';
+import { requireLogin } from './utils/auth.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from './utils/cost.js';
 import { startAutoClose, closeDays, loadMonthly, monthlyTableHTML } from './utils/dayclose.js';
 import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster } from './utils/roster.js';
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL || '',
-  import.meta.env.VITE_SUPABASE_ANON_KEY || ''
-);
 
 // ── State ──
 let currentTeamId = null;
@@ -716,6 +713,7 @@ function wireGlobalDate() {
 }
 async function init() {
   try { const d = sessionStorage.getItem('ml_date'); if (d && d <= TODAY) SEL = d; } catch {}
+  await requireLogin();
   wireGlobalDate();
   startAutoClose(supabase);
   await loadData();

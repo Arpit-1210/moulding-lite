@@ -1,6 +1,7 @@
 import './styles/base.css';
 import { supabase as ownerSupabase } from './services/supabaseClient.js';
 import { startAutoClose } from './utils/dayclose.js';
+import { requireLogin } from './utils/auth.js';
 import './styles/owner.css';
 import { renderDashboard } from './pages/owner/dashboard.js';
 import { renderProductionLog } from './pages/owner/productionLog.js';
@@ -56,7 +57,6 @@ async function navigate(route) {
   catch(e) { pageRoot.innerHTML = `<div class="state-msg" style="color:var(--red);">Error: ${e.message}</div>`; }
 }
 
-window.addEventListener('hashchange', () => navigate(getRoute()));
-navigate(getRoute());
-
-startAutoClose(ownerSupabase);
+window.addEventListener('hashchange', () => { if (authed) navigate(getRoute()); });
+let authed = false;
+requireLogin().then(() => { authed = true; navigate(getRoute()); startAutoClose(ownerSupabase); });

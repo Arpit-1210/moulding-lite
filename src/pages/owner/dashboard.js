@@ -1,8 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../services/supabaseClient.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from '../../utils/cost.js';
 import { loadMonthly, monthlyTableHTML } from '../../utils/dayclose.js';
 import { fetchRosterRows } from '../../utils/roster.js';
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
 let dashChannel = null;
 let cpkChart = null;

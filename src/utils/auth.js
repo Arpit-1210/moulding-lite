@@ -1,0 +1,61 @@
+import { supabase } from '../services/supabaseClient.js';
+
+const STYLE = `
+#login-ov{position:fixed;inset:0;z-index:100000;background:#f4f6f9;display:flex;align-items:center;justify-content:center;padding:20px;font-family:Inter,system-ui,-apple-system,sans-serif}
+#login-ov .box{background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:26px 22px;width:100%;max-width:380px;box-shadow:0 10px 30px rgba(16,24,40,.08)}
+#login-ov h2{margin:0 0 4px;font-size:20px;color:#101828}
+#login-ov p{margin:0 0 18px;color:#667085;font-size:13px}
+#login-ov label{display:block;font-size:12px;font-weight:600;color:#344054;margin-bottom:5px}
+#login-ov input{width:100%;box-sizing:border-box;font-size:16px;padding:11px 12px;border:1px solid #d0d5dd;border-radius:10px;margin-bottom:12px}
+#login-ov .pw{position:relative}#login-ov .pw input{padding-right:62px}
+#login-ov .pw button{position:absolute;right:6px;top:7px;border:0;background:none;color:#667085;font-weight:600;font-size:12px;cursor:pointer;padding:6px}
+#login-ov .err{color:#b91c1c;font-size:13px;min-height:18px;margin-bottom:8px}
+#login-ov .go{width:100%;border:0;background:#1967D2;color:#fff;font-weight:700;font-size:15px;padding:13px;border-radius:10px;cursor:pointer}
+#login-ov .go:disabled{opacity:.6}
+.logout-btn{margin-top:10px;width:100%;border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:8px;font-size:13px;font-weight:600;color:#667085;cursor:pointer}
+`;
+
+function addLogout() {
+  const f = document.querySelector('.sidebar-footer');
+  if (!f || f.querySelector('.logout-btn')) return;
+  const b = document.createElement('button');
+  b.className = 'logout-btn'; b.textContent = 'Logout';
+  b.onclick = async () => { await supabase.auth.signOut(); location.reload(); };
+  f.appendChild(b);
+}
+
+function showLogin() {
+  return new Promise((resolve) => {
+    if (!document.getElementById('login-style')) {
+      const st = document.createElement('style'); st.id = 'login-style'; st.textContent = STYLE; document.head.appendChild(st);
+    }
+    const ov = document.createElement('div'); ov.id = 'login-ov';
+    ov.innerHTML = `
+      <form class="box" autocomplete="on">
+        <h2>🔒 Sign in</h2>
+        <p>Factory OS · Moulding. Enter your login ID and password.</p>
+        <label>Login ID</label><input id="lg-email" type="email" name="username" autocomplete="username" inputmode="email" placeholder="name@gfpl.com" required />
+        <label>Password</label><div class="pw"><input id="lg-pass" type="password" name="password" autocomplete="current-password" required /><button type="button" id="lg-show">Show</button></div>
+        <div class="err" id="lg-err"></div>
+        <button class="go" id="lg-go" type="submit">Sign in</button>
+      </form>`;
+    document.body.appendChild(ov);
+    const $ = (s) => ov.querySelector(s);
+    $('#lg-show').onclick = () => { const i = $('#lg-pass'); const s = i.type === 'password'; i.type = s ? 'text' : 'password'; $('#lg-show').textContent = s ? 'Hide' : 'Show'; };
+    $('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('#lg-go'); btn.disabled = true; btn.textContent = 'Signing in…'; $('#lg-err').textContent = '';
+      const { error } = await supabase.auth.signInWithPassword({ email: $('#lg-email').value.trim(), password: $('#lg-pass').value });
+      if (error) { btn.disabled = false; btn.textContent = 'Sign in'; $('#lg-err').textContent = /invalid|credentials/i.test(error.message) ? 'Wrong login ID or password' : error.message; return; }
+      ov.remove(); resolve();
+    };
+  });
+}
+
+/** Resolves once the user is signed in (shows the login screen first if needed). */
+export async function requireLogin() {
+  const { data } = await supabase.auth.getSession();
+  if (!data?.session) await showLogin();
+  addLogout();
+  supabase.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') location.reload(); });
+}
