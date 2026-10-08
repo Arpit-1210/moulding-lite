@@ -87,15 +87,15 @@ export async function loadMonthly(supabase) {
     add(today, t.units, t.weight, logs.reduce((s, l) => s + entryValue(l.quantity, l.weight, price.get(l.product_id)), 0), t.wage);
   }
   return [...months.values()].sort((a, b) => b.month.localeCompare(a.month))
-    .map(m => ({ ...m, days: m.dates.size, cpk: m.weight > 0 ? m.wage / m.weight : 0 }));
+    .map(m => ({ ...m, days: m.dates.size, cpk: m.weight > 0 ? m.wage / m.weight : 0, rpk: m.weight > 0 ? m.value / m.weight : 0 }));
 }
 
 export function monthlyTableHTML(rows, tableClass) {
   const inr = n => '₹' + Math.round(n || 0).toLocaleString('en-IN');
   const label = k => { const [y, m] = k.split('-'); return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1] + ' ' + y; };
-  const body = rows.map(r => `<tr><td class="bold">${label(r.month)}</td><td class="num">${r.days}</td><td class="num">${r.units.toLocaleString('en-IN')}</td><td class="num">${r.weight.toFixed(1)} kg</td><td class="num">${inr(r.value)}</td><td class="num">${inr(r.wage)}</td><td class="num" style="font-weight:600;">${r.cpk > 0 ? '₹' + r.cpk.toFixed(2) : '—'}</td></tr>`).join('')
-    || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#667085;">No production recorded yet</td></tr>';
+  const body = rows.map(r => `<tr><td class="bold">${label(r.month)}</td><td class="num">${r.days}</td><td class="num">${r.units.toLocaleString('en-IN')}</td><td class="num">${r.weight.toFixed(1)} kg</td><td class="num">${inr(r.value)}</td><td class="num">${inr(r.wage)}</td><td class="num" style="font-weight:600;">${r.cpk > 0 ? '₹' + r.cpk.toFixed(2) : '—'}</td><td class="num" style="font-weight:600;">${r.rpk > 0 ? '₹' + r.rpk.toFixed(2) : '—'}</td></tr>`).join('')
+    || '<tr><td colspan="8" style="text-align:center;padding:20px;color:#667085;">No production recorded yet</td></tr>';
   return `<div class="table-wrap"><table class="${tableClass}">
-    <thead><tr><th>Month</th><th class="num">Days</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Cost/kg</th></tr></thead>
+    <thead><tr><th>Month</th><th class="num">Days</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Value</th><th class="num">Wage</th><th class="num">Labour Cost/kg</th><th class="num">Realisation/kg</th></tr></thead>
     <tbody>${body}</tbody></table></div>`;
 }

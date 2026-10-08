@@ -1,18 +1,21 @@
 // Peak season: every worker is on overtime, paid 1.5x their daily rate.
 // When peak season ends, set this to 1 and every screen recalculates.
 import { rosterIndex, membersOn, fetchRosterRows } from './roster.js';
+import { entryValue } from './value.js';
 
 export const OVERTIME_MULTIPLIER = 1.5;
 
 /**
  * Wage for one team on one day = sum of THAT DAY's roster members' daily_rate
  * x multiplier, counted ONCE per team per day (not per production entry).
- * Cost per kg = total wage / total weight produced.
+ * Labour cost per kg = total wage / total weight produced.
+ * Realisation per kg = total value of goods produced / total weight produced.
  *
  * Returns one row per (team, day) that logged production:
- *   { date, teamId, team, units, weight, wage, cpk }
+ *   { date, teamId, team, units, weight, wage, value, cpk (labour cost/kg), rpk (realisation/kg) }
  */
-export function buildTeamDays(logs, teams, workers, rosterRows = [], summaries = []) {
+export function buildTeamDays(logs, teams, workers, rosterRows = [], summaries = [], products = []) {
+  const prodMap = new Map((products || []).map(p => [p.id, p]));
   const rate = new Map(workers.map(w => [w.name, Number(w.daily_rate || 0)]));
   const teamMap = new Map(teams.map(t => [t.id, t]));
   const idx = rosterIndex(rosterRows);
@@ -27,38 +30,44 @@ export function buildTeamDays(logs, teams, workers, rosterRows = [], summaries =
     const key = l.team_id + '|' + l.production_date;
     let r = rows.get(key);
     if (!r) {
-      r = { date: l.production_date, teamId: l.team_id, team: t?.name || 'Team ' + (t?.team_number ?? '—'), units: 0, weight: 0, wage: frozen.has(`${l.production_date}|${l.team_id}`) ? frozen.get(`${l.production_date}|${l.team_id}`) : wageOf(t, l.production_date) };
+      r = { date: l.production_date, teamId: l.team_id, team: t?.name || 'Team ' + (t?.team_number ?? '—'), units: 0, weight: 0, value: 0, wage: frozen.has(`${l.production_date}|${l.team_id}`) ? frozen.get(`${l.production_date}|${l.team_id}`) : wageOf(t, l.production_date) };
       rows.set(key, r);
     }
     r.units += Number(l.quantity || 0);
     r.weight += Number(l.weight || 0);
+    r.value += entryValue(l.quantity, l.weight, prodMap.get(l.product_id));
   }
-  return [...rows.values()].map(r => ({ ...r, cpk: r.weight > 0 ? r.wage / r.weight : 0 }));
+  return [...rows.values()].map(r => ({ ...r, cpk: r.weight > 0 ? r.wage / r.weight : 0, rpk: r.weight > 0 ? r.value / r.weight : 0 }));
 }
 
-/** Sum a list of team-day rows: { units, weight, wage, cpk }. */
+/** Sum a list of team-day rows: { units, weight, wage, value, cpk, rpk }. */
 export function sumDays(list) {
-  const s = list.reduce((a, r) => ({ units: a.units + r.units, weight: a.weight + r.weight, wage: a.wage + r.wage }), { units: 0, weight: 0, wage: 0 });
-  return { ...s, cpk: s.weight > 0 ? s.wage / s.weight : 0 };
+  const s = list.reduce((a, r) => ({ units: a.units + r.units, weight: a.weight + r.weight, wage: a.wage + r.wage, value: a.value + (r.value || 0) }), { units: 0, weight: 0, wage: 0, value: 0 });
+  return { ...s, cpk: s.weight > 0 ? s.wage / s.weight : 0, rpk: s.weight > 0 ? s.value / s.weight : 0 };
 }
 
-/** Chart.js scatter config: cost per kg (y) vs weight produced (x), one point per team per day. */
+/** Chart.js scatter config: labour cost per kg and realisation per kg (y) vs weight produced (x), one point per team per day. */
 export function costVsWeightChart(teamDays) {
   return {
     type: 'scatter',
     data: { datasets: [{
+      label: 'Labour cost per kg',
       data: teamDays.filter(r => r.weight > 0).map(r => ({ x: +r.weight.toFixed(1), y: +r.cpk.toFixed(2), team: r.team, date: r.date })),
       backgroundColor: '#1967D2', pointRadius: 6, pointHoverRadius: 8,
+    }, {
+      label: 'Realisation per kg',
+      data: teamDays.filter(r => r.weight > 0 && r.value > 0).map(r => ({ x: +r.weight.toFixed(1), y: +r.rpk.toFixed(2), team: r.team, date: r.date })),
+      backgroundColor: '#16a34a', pointRadius: 6, pointHoverRadius: 8,
     }] },
     options: {
       responsive: true,
       plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => `${c.raw.team} · ${c.raw.date}: ${c.raw.x} kg, ₹${c.raw.y}/kg` } },
+        legend: { display: true },
+        tooltip: { callbacks: { label: c => `${c.dataset.label} · ${c.raw.team} · ${c.raw.date}: ${c.raw.x} kg, ₹${c.raw.y}/kg` } },
       },
       scales: {
         x: { title: { display: true, text: 'Weight produced (kg)' }, beginAtZero: true },
-        y: { title: { display: true, text: 'Cost per kg (₹)' }, beginAtZero: true, ticks: { callback: v => '₹' + v } },
+        y: { title: { display: true, text: '₹ per kg' }, beginAtZero: true, ticks: { callback: v => '₹' + v } },
       },
     },
   };
@@ -66,14 +75,15 @@ export function costVsWeightChart(teamDays) {
 
 /** All-time cost data (permanent totals): every log, team, worker and roster. */
 export async function loadCostData(supabase) {
-  const [lr, tr, wr, rosters, summaries] = await Promise.all([
-    supabase.from('production_log').select('team_id, production_date, quantity, weight').limit(50000),
+  const [lr, tr, wr, rosters, summaries, pr0] = await Promise.all([
+    supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').limit(50000),
     supabase.from('teams').select('*'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
     fetchSummaries(supabase),
+    supabase.from('products').select('id, selling_price, pricing_unit'),
   ]);
-  const teamDays = buildTeamDays(lr.data || [], tr.data || [], wr.data || [], rosters, summaries);
+  const teamDays = buildTeamDays(lr.data || [], tr.data || [], wr.data || [], rosters, summaries, pr0.data || []);
   return { teamDays, overall: sumDays(teamDays) };
 }
 

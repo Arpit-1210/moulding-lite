@@ -114,7 +114,7 @@ async function renderDashboard() {
     fetchSummaries(supabase),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
-  const dayTeamDays = buildTeamDays(logs, allTeams, wr0.data || [], rosters0, sums0);
+  const dayTeamDays = buildTeamDays(logs, allTeams, wr0.data || [], rosters0, sums0, prods);
   const dayTot = sumDays(dayTeamDays);
   const permanent = (await loadCostData(supabase)).overall;
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
@@ -136,6 +136,7 @@ async function renderDashboard() {
     const active = tUnits > 0;
     const tdRow = dayTeamDays.find(r => r.team === (t.name || 'Team ' + t.team_number));
     const tCpk = tdRow && tdRow.weight > 0 ? '₹' + tdRow.cpk.toFixed(2) : '—';
+    const tRpk = tdRow && tdRow.rpk > 0 ? '₹' + tdRow.rpk.toFixed(2) : '—';
     return `<div class="team-card" style="border-left-color:${active ? '#16a34a' : '#e4e7ec'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <h3>${t.name || 'Team ' + t.team_number}</h3>
@@ -144,7 +145,8 @@ async function renderDashboard() {
       <div class="tstat"><span class="l">Units</span><span class="v" style="color:#1967D2">${tUnits}</span></div>
       <div class="tstat"><span class="l">Weight</span><span class="v">${tWt.toFixed(1)} kg</span></div>
       <div class="tstat"><span class="l">Entries</span><span class="v">${tLogs.length}</span></div>
-      <div class="tstat"><span class="l">Cost per kg</span><span class="v" style="color:#dc2626">${tCpk}</span></div>
+      <div class="tstat"><span class="l">Labour cost per kg</span><span class="v" style="color:#dc2626">${tCpk}</span></div>
+      <div class="tstat"><span class="l">Realisation per kg</span><span class="v" style="color:#16a34a">${tRpk}</span></div>
     </div>`;
   }).join('') || '<div class="state-msg">No teams yet</div>';
 
@@ -165,8 +167,10 @@ async function renderDashboard() {
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight (kg)</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">produced</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${allTeams.length} total</div></div>
       <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made</div></div>
-      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🏭</div><div class="kpi-label">Factory Cost per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.cpk > 0 ? '₹' + dayTot.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">labour ₹${Math.round(dayTot.wage).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
-      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Cost per kg</div><div class="kpi-value">${permanent.cpk > 0 ? '₹' + permanent.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ₹${Math.round(permanent.wage).toLocaleString('en-IN')} ÷ ${permanent.weight.toFixed(0)} kg</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🏭</div><div class="kpi-label">Factory Labour Cost per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.cpk > 0 ? '₹' + dayTot.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">labour ₹${Math.round(dayTot.wage).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
+      <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">💹</div><div class="kpi-label">Factory Realisation per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.rpk > 0 ? '₹' + dayTot.rpk.toFixed(2) : '—'}</div><div class="kpi-sub">value ₹${Math.round(dayTot.value).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🧮</div><div class="kpi-label">Total Labour Cost per kg</div><div class="kpi-value">${permanent.cpk > 0 ? '₹' + permanent.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ₹${Math.round(permanent.wage).toLocaleString('en-IN')} ÷ ${permanent.weight.toFixed(0)} kg</div></div>
+      <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">💹</div><div class="kpi-label">Total Realisation per kg</div><div class="kpi-value">${permanent.rpk > 0 ? '₹' + permanent.rpk.toFixed(2) : '—'}</div><div class="kpi-sub">all time · ₹${Math.round(permanent.value).toLocaleString('en-IN')} ÷ ${permanent.weight.toFixed(0)} kg</div></div>
     </div>
     <div class="section-head"><div><div class="section-title">Teams — ${fmtD(SEL)}</div></div></div>
     <div class="team-grid">${teamCards}</div>
@@ -556,7 +560,7 @@ async function renderInventory() {
     fetchSummaries(supabase),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
-  const teamDays = buildTeamDays(logs, allTeams, wr.data || [], rosterRows, summaries);
+  const teamDays = buildTeamDays(logs, allTeams, wr.data || [], rosterRows, summaries, prods);
   const overall = sumDays(teamDays);
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
   const teamMap = Object.fromEntries(allTeams.map(t => [t.id, t]));
@@ -595,9 +599,10 @@ async function renderInventory() {
   const prodLabels = Object.keys(byProd).slice(0, 10);
   const prodData = prodLabels.map(n => byProd[n].qty);
 
-  // Team cost/kg chart data
+  // Team labour cost/kg + realisation/kg chart data
   const teamLabels = Object.keys(byTeam);
   const cpkgData = teamLabels.map(t => byTeam[t].wt > 0 ? +(byTeam[t].wage / byTeam[t].wt).toFixed(2) : 0);
+  const rpkgData = teamLabels.map(t => byTeam[t].wt > 0 ? +(byTeam[t].value / byTeam[t].wt).toFixed(2) : 0);
 
   // Product table rows
   const prodRows = Object.entries(byProd).sort((a, b) => b[1].qty - a[1].qty)
@@ -613,13 +618,15 @@ async function renderInventory() {
   // Team cost cards
   const teamCards = Object.entries(byTeam).map(([name, v]) => {
     const cpkg = v.wt > 0 ? (v.wage / v.wt).toFixed(2) : 0;
+    const rpkg = v.wt > 0 && v.value > 0 ? (v.value / v.wt).toFixed(2) : 0;
     return `<div class="team-cost-card">
       <h4>${name}</h4>
       <div class="tcstat"><span class="l">Units Produced</span><span class="v">${v.qty}</span></div>
       <div class="tcstat"><span class="l">Total Weight</span><span class="v">${v.wt.toFixed(1)} kg</span></div>
       <div class="tcstat"><span class="l">Total Value</span><span class="v">₹${v.value.toLocaleString('en-IN')}</span></div>
       <div class="tcstat"><span class="l">Total Wage (${OVERTIME_MULTIPLIER}x)</span><span class="v">₹${Math.round(v.wage).toLocaleString('en-IN')}</span></div>
-      <div class="tcstat"><span class="l">Cost per kg</span><span class="v cpkg">${cpkg > 0 ? '₹' + Number(cpkg).toLocaleString('en-IN') : '—'}</span></div>
+      <div class="tcstat"><span class="l">Labour cost per kg</span><span class="v cpkg">${cpkg > 0 ? '₹' + Number(cpkg).toLocaleString('en-IN') : '—'}</span></div>
+      <div class="tcstat"><span class="l">Realisation per kg</span><span class="v" style="color:#16a34a;font-weight:700;">${rpkg > 0 ? '₹' + Number(rpkg).toLocaleString('en-IN') : '—'}</span></div>
     </div>`;
   }).join('') || '<div class="state-msg">No team produced anything on this date</div>';
 
@@ -639,10 +646,11 @@ async function renderInventory() {
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-label">Total Weight</div><div class="kpi-value">${totalWeight.toFixed(0)} kg</div><div class="kpi-sub">all time</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">types made</div></div>
       <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-label">Teams</div><div class="kpi-value">${allTeams.length}</div><div class="kpi-sub">active teams</div></div>
-      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
+      <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Labour Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
+      <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-label">Realisation per kg</div><div class="kpi-value">${overall.rpk > 0 ? '₹' + overall.rpk.toFixed(2) : '—'}</div><div class="kpi-sub">value ÷ weight, all time</div></div>
     </div>
 
-    <div class="section-head"><div class="section-title">Team Cost per Kg — ${fmtD(SEL)}</div><div class="section-sub">That day's wage ÷ that day's weight · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
+    <div class="section-head"><div class="section-title">Team Labour Cost &amp; Realisation per Kg — ${fmtD(SEL)}</div><div class="section-sub">Labour cost/kg = that day's wage ÷ weight · Realisation/kg = value of goods ÷ weight · wage = daily rate × ${OVERTIME_MULTIPLIER} (overtime)</div></div>
         <div class="team-cost-grid">${teamCards}</div>
 
     <div class="section-head"><div class="section-title">Charts</div></div>
@@ -652,13 +660,13 @@ async function renderInventory() {
         <canvas id="chart-prod"></canvas>
       </div>
       <div class="chart-card">
-        <h3>Cost per Kg by Team (₹) — ${SEL === TODAY ? 'today' : SEL}</h3>
+        <h3>Labour Cost &amp; Realisation per Kg by Team (₹) — ${SEL === TODAY ? 'today' : SEL}</h3>
         <canvas id="chart-cpkg"></canvas>
       </div>
     </div>
 
     <div class="chart-card" style="margin-bottom:20px;">
-      <h3>Cost per Kg vs Weight Produced (each dot = one team's day)</h3>
+      <h3>Labour Cost &amp; Realisation per Kg vs Weight Produced (each dot = one team's day)</h3>
       <canvas id="chart-cpk-weight"></canvas>
     </div>
 
@@ -686,8 +694,8 @@ async function renderInventory() {
     if (teamLabels.length) {
       new Chart(document.getElementById('chart-cpkg'), {
         type: 'bar',
-        data: { labels: teamLabels, datasets: [{ data: cpkgData, backgroundColor: '#1967D2', borderRadius: 6 }] },
-        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { callback: v => '₹' + v } } }, responsive: true }
+        data: { labels: teamLabels, datasets: [{ label: 'Labour cost per kg', data: cpkgData, backgroundColor: '#1967D2', borderRadius: 6 }, { label: 'Realisation per kg', data: rpkgData, backgroundColor: '#16a34a', borderRadius: 6 }] },
+        options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true, ticks: { callback: v => '₹' + v } } }, responsive: true }
       });
     }
     if (teamDays.length) new Chart(document.getElementById('chart-cpk-weight'), costVsWeightChart(teamDays));
