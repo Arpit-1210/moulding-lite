@@ -30,12 +30,23 @@ export async function renderDashboard(root) {
     <div id="dash-teamperf"></div>
     <div class="section-head"><div><div class="section-title">Team-wise Labour Cost &amp; Realisation per Kg (each day)</div><div class="section-sub">Labour cost/kg = team's wage that day ÷ weight · Realisation/kg = value of goods ÷ weight</div></div></div>
     <div id="dash-teamdays"></div>
-    <div class="section-head"><div><div class="section-title">Labour Cost &amp; Realisation per Kg vs Weight</div><div class="section-sub">Each dot = one team's day · blue = labour cost/kg (wage at ${OVERTIME_MULTIPLIER}x ÷ weight) · green = realisation/kg (value ÷ weight)</div></div></div>
-    <div class="card" style="margin-bottom:20px;"><canvas id="dash-cpk-chart"></canvas></div>
+    <div class="section-head"><div><div class="section-title">Labour Cost &amp; Realisation per Kg vs Weight</div><div class="section-sub">Each dot = one team on the chosen day · blue = labour cost/kg (wage at ${OVERTIME_MULTIPLIER}x ÷ weight) · green = realisation/kg (value ÷ weight)</div></div></div>
+    <div class="card" style="margin-bottom:20px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;"><label style="font-size:12px;font-weight:600;color:var(--ink-dim);">Day</label><input type="date" id="dash-chart-date" value="${TODAY}" max="${TODAY}" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;"><span style="font-size:12px;color:var(--ink-dim);">Only teams that worked on this day</span></div><canvas id="dash-cpk-chart"></canvas><div id="dash-cpk-empty"></div></div>
     <div class="section-head"><div><div class="section-title">Monthly Record</div><div class="section-sub">Each day is saved automatically after 12:00 am and added to its month</div></div></div>
     <div id="dash-monthly"></div>
     <div class="section-head"><div class="section-title">Today by Product</div></div>
     <div id="dash-today"></div>`;
+
+  let lastTeamDays = [];
+  function drawChart() {
+    if (cpkChart) { cpkChart.destroy(); cpkChart = null; }
+    const day = root.querySelector('#dash-chart-date')?.value || TODAY;
+    const rows = lastTeamDays.filter(r => r.date === day);
+    const cv = root.querySelector('#dash-cpk-chart'), em = root.querySelector('#dash-cpk-empty');
+    if (em) em.innerHTML = rows.length ? '' : '<div class="state-msg">No team production on this day</div>';
+    if (cv && rows.length && window.Chart) cpkChart = new window.Chart(cv, costVsWeightChart(rows));
+  }
+  root.querySelector('#dash-chart-date')?.addEventListener('change', drawChart);
 
   async function load() {
     const from = new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
@@ -110,9 +121,8 @@ export async function renderDashboard(root) {
       <tbody>${tdRows}</tbody></table></div>`;
 
     // cost per kg vs weight chart
-    if (cpkChart) { cpkChart.destroy(); cpkChart = null; }
-    const cv = root.querySelector('#dash-cpk-chart');
-    if (cv && teamDays.length && window.Chart) cpkChart = new window.Chart(cv, costVsWeightChart(teamDays));
+    lastTeamDays = allCost.teamDays;
+    drawChart();
 
     loadMonthly(supabase).then(r => { const m = root.querySelector('#dash-monthly'); if (m) m.innerHTML = monthlyTableHTML(r, 'data-table'); }).catch(() => {});
 

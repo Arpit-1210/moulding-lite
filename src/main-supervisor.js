@@ -698,7 +698,7 @@ async function renderInventory() {
         options: { plugins: { legend: { display: true } }, scales: { y: { beginAtZero: true, ticks: { callback: v => '₹' + v } } }, responsive: true }
       });
     }
-    if (teamDays.length) new Chart(document.getElementById('chart-cpk-weight'), costVsWeightChart(teamDays));
+    { const dayTeams = teamDays.filter(r => r.date === SEL); if (dayTeams.length) new Chart(document.getElementById('chart-cpk-weight'), costVsWeightChart(dayTeams)); else { const c = document.getElementById('chart-cpk-weight'); if (c) c.insertAdjacentHTML('afterend', '<div class="state-msg">No team production on this date</div>'); } }
     // Make charts stack on mobile
     if (window.innerWidth < 600) {
       document.getElementById('chart-grid').style.gridTemplateColumns = '1fr';
