@@ -396,6 +396,8 @@
       .inv-hero-kpis { grid-template-columns: 1fr 1fr; }
       .kpi-grid { grid-template-columns: 1fr 1fr; }
     }
+      .refresh-btn{border:1px solid #d0d5dd;background:#fff;color:#1967D2;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+    .mobile-topbar .refresh-btn{margin-left:8px;padding:5px 8px}
   </style>
 <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -429,7 +431,7 @@
   <div class="mobile-topbar">
     <button class="hamburger" id="hamburger">☰</button>
     <div class="mobile-brand">Factory<span>OS</span> Moulding</div>
-    <div class="sync-badge"><span class="dot"></span><span>Live</span></div>
+    <div class="sync-badge"><span class="dot"></span><span>Live</span></div><button type="button" class="refresh-btn" onclick="location.reload()" aria-label="Refresh" title="Refresh">&#8635; Refresh</button>
   </div>
   <div class="sidebar-overlay" id="overlay"></div>
 
@@ -438,7 +440,7 @@
     <header class="app-topbar">
       <h1 id="page-title">Dashboard</h1>
       <div class="topbar-right">
-        <div class="sync-badge"><span class="dot"></span><span>Live</span></div>
+        <div class="sync-badge"><span class="dot"></span><span>Live</span></div><button type="button" class="refresh-btn" onclick="location.reload()" aria-label="Refresh" title="Refresh">&#8635; Refresh</button>
         <div class="date-pill" id="date-pill"></div>
       </div>
     </header>

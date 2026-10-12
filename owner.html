@@ -14,6 +14,7 @@
 <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <script>if("serviceWorker" in navigator)window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){})});</script>
+  <style>.refresh-btn{border:1px solid #d0d5dd;background:#fff;color:#1967D2;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;margin-left:8px}</style>
 </head>
 <body>
 <div class="app-shell">
@@ -46,7 +47,7 @@
   <div class="mobile-topbar">
     <button class="hamburger" id="hamburger" aria-label="Menu">☰</button>
     <div class="mobile-brand">Factory<b>OS</b> Moulding</div>
-    <span class="sync-pill" id="sync-pill-mobile"><span class="dot"></span></span>
+    <span class="sync-pill" id="sync-pill-mobile"><span class="dot"></span></span><button type="button" class="refresh-btn" onclick="location.reload()" aria-label="Refresh" title="Refresh">&#8635; Refresh</button>
   </div>
   <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -58,7 +59,7 @@
         <div id="page-sub" style="font-size:13px;color:var(--ink-dim);margin-top:2px;"></div>
       </div>
       <div class="topbar-right">
-        <span class="pill" id="today-pill"></span>
+        <span class="pill" id="today-pill"></span><button type="button" class="refresh-btn" onclick="location.reload()" aria-label="Refresh" title="Refresh">&#8635; Refresh</button>
       </div>
     </header>
     <main class="app-content" id="page-root">
