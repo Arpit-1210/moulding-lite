@@ -84,7 +84,10 @@ async function loadData() {
   teams = tr.data || [];
   products = pr.data || [];
   workers = wr.data || [];
-  if (teams.length && !currentTeamId) currentTeamId = teams[0].id;
+  let savedTeam = null; try { savedTeam = localStorage.getItem('ml_team'); } catch {}
+  if (teams.length && (!currentTeamId || !teams.some(t => t.id === currentTeamId))) {
+    currentTeamId = (savedTeam && teams.some(t => t.id === savedTeam)) ? savedTeam : teams[0].id;
+  }
   await loadTodayLogs();
 }
 
@@ -208,6 +211,16 @@ async function renderProduction() {
         <label>Product</label>
         <select id="prod-select"><option value="">Select product…</option></select>
       </div>
+      <button type="button" class="btn-ghost" id="btn-newprod" style="margin:-4px 0 12px;">+ Product not in list? Add it</button>
+      <div id="newprod-box" hidden style="border:1px solid #d0d5dd;border-radius:10px;padding:12px;margin-bottom:12px;background:#f9fafb;">
+        <div class="field"><label>New product name</label><input type="text" id="np-name" autocomplete="off" placeholder="e.g. Ganesh Statue 2ft" /></div>
+        <div class="field-row">
+          <div class="field"><label>Product price (₹)</label><input type="number" id="np-price" inputmode="decimal" placeholder="0" min="0" step="0.01" /></div>
+          <div class="field"><label>Priced</label><select id="np-unit"><option value="unit">per unit</option><option value="kg">per kg</option></select></div>
+        </div>
+        <div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="np-save">Save product</button><button type="button" class="btn-ghost" id="np-cancel">Cancel</button></div>
+        <div id="np-msg" style="font-size:12px;margin-top:8px;"></div>
+      </div>
       <div class="field-row">
         <div class="field" style="margin-bottom:0;"><label>Quantity (pcs)</label><input type="number" id="prod-qty" inputmode="numeric" placeholder="0" min="1" /></div>
         <div class="field" style="margin-bottom:0;"><label>Weight (kg)</label><input type="number" id="prod-wt" inputmode="decimal" placeholder="0.0" step="0.1" /></div>
@@ -226,6 +239,7 @@ async function renderProduction() {
   tabsEl.querySelectorAll('.team-tab').forEach(btn =>
     btn.addEventListener('click', () => {
       currentTeamId = btn.dataset.id;
+      try { localStorage.setItem('ml_team', currentTeamId); } catch {}
       tabsEl.querySelectorAll('.team-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       updateRosterNote();
@@ -254,6 +268,28 @@ async function renderProduction() {
   }
   fillProducts();
   document.getElementById('prod-search').addEventListener('input', e => fillProducts(e.target.value));
+
+  // Add a missing product right here (team stays selected)
+  const npBox = document.getElementById('newprod-box');
+  document.getElementById('btn-newprod').onclick = () => { npBox.hidden = !npBox.hidden; if (!npBox.hidden) { const n = document.getElementById('np-name'); n.value = document.getElementById('prod-search').value; n.focus(); } };
+  document.getElementById('np-cancel').onclick = () => { npBox.hidden = true; };
+  document.getElementById('np-save').onclick = async () => {
+    const msg = document.getElementById('np-msg');
+    const name = document.getElementById('np-name').value.trim();
+    const price = parseFloat(document.getElementById('np-price').value) || 0;
+    const unit = document.getElementById('np-unit').value;
+    msg.style.color = '#dc2626';
+    if (!name) { msg.textContent = 'Enter product name'; return; }
+    if (products.some(p => p.name.toLowerCase() === name.toLowerCase())) { msg.textContent = 'This product already exists. Pick it from the list'; return; }
+    const b = document.getElementById('np-save'); b.disabled = true;
+    const { data, error } = await supabase.from('products').insert([{ name, selling_price: price, cost_price: 0, pricing_unit: unit, active: true }]).select().single();
+    b.disabled = false;
+    if (error) { msg.textContent = 'Could not add: ' + error.message; return; }
+    products = [...products, data].sort((a, b2) => a.name.localeCompare(b2.name));
+    document.getElementById('prod-search').value = ''; fillProducts(); sel.value = data.id;
+    ['np-name', 'np-price'].forEach(i => { document.getElementById(i).value = ''; });
+    npBox.hidden = true; toast(`${name} added ✓`); document.getElementById('prod-qty').focus();
+  };
 
   updateKPIs();
   renderTodayLog();
