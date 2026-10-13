@@ -26,9 +26,8 @@ export async function renderDashboard(root) {
       <button class="range-btn" data-d="365">1 Year</button>
     </div>
     <div id="dash-days"></div>
-    <div class="section-head"><div><div class="section-title">Team Performance</div><div class="section-sub">Per team over the selected period · total labour cost ÷ total weight</div></div></div>
-    <div id="dash-teamperf"></div>
-    <div class="section-head"><div><div class="section-title">Team-wise Labour Cost &amp; Realisation per Kg (each day)</div><div class="section-sub">Labour cost/kg = team's wage that day ÷ weight · Realisation/kg = value of goods ÷ weight</div></div></div>
+    <div class="section-head"><div><div class="section-title">Team Report — one day</div><div class="section-sub">Teams made that day · labour cost/kg = team's wage that day ÷ weight · realisation/kg = value of goods ÷ weight</div></div></div>
+    <div class="card" style="margin-bottom:12px;"><label style="font-size:12px;font-weight:600;color:var(--ink-dim);margin-right:8px;">Day</label><input type="date" id="dash-team-date" value="${TODAY}" max="${TODAY}" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;"></div>
     <div id="dash-teamdays"></div>
     <div class="section-head"><div><div class="section-title">Labour Cost &amp; Realisation per Kg vs Weight</div><div class="section-sub">Each dot = one team on the chosen day · blue = labour cost/kg (wage at ${OVERTIME_MULTIPLIER}x ÷ weight) · green = realisation/kg (value ÷ weight)</div></div></div>
     <div class="card" style="margin-bottom:20px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;"><label style="font-size:12px;font-weight:600;color:var(--ink-dim);">Day</label><input type="date" id="dash-chart-date" value="${TODAY}" max="${TODAY}" style="padding:7px 10px;border:1px solid var(--border-strong);border-radius:8px;font-size:14px;"><span style="font-size:12px;color:var(--ink-dim);">Only teams that worked on this day</span></div><canvas id="dash-cpk-chart"></canvas><div id="dash-cpk-empty"></div></div>
@@ -47,6 +46,23 @@ export async function renderDashboard(root) {
     if (cv && rows.length && window.Chart) cpkChart = new window.Chart(cv, costVsWeightChart(rows));
   }
   root.querySelector('#dash-chart-date')?.addEventListener('change', drawChart);
+
+  function drawTeamReport() {
+    const day = root.querySelector('#dash-team-date')?.value || TODAY;
+    const rows = lastTeamDays.filter(r => r.date === day).sort((a, b) => a.team.localeCompare(b.team));
+    const tot = sumDays(rows);
+    const tr = rows.map(r => `<tr><td class="bold">${r.team}</td><td class="num">${r.units.toLocaleString('en-IN')}</td><td class="num">${r.weight.toFixed(1)} kg</td><td class="num">${inr(r.wage)}</td><td class="num" style="font-weight:600;">${r.weight > 0 ? '₹' + r.cpk.toFixed(2) : '—'}</td><td class="num" style="font-weight:600;">${r.rpk > 0 ? '₹' + r.rpk.toFixed(2) : '—'}</td></tr>`).join('')
+      || '<tr><td colspan="6" style="text-align:center;color:var(--ink-dim);padding:20px;">No team produced anything on this day</td></tr>';
+    root.querySelector('#dash-teamdays').innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Team</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Wage</th><th class="num">Labour Cost/kg</th><th class="num">Realisation/kg</th></tr></thead>
+      <tbody>${tr}</tbody>
+      ${rows.length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Factory (${fmtDate(day)})</td><td class="num">${tot.units.toLocaleString('en-IN')}</td><td class="num">${tot.weight.toFixed(1)} kg</td><td class="num">${inr(tot.wage)}</td><td class="num">${tot.weight > 0 ? '₹' + tot.cpk.toFixed(2) : '—'}</td><td class="num">${tot.rpk > 0 ? '₹' + tot.rpk.toFixed(2) : '—'}</td></tr></tfoot>` : ''}
+    </table></div>`;
+  }
+  root.querySelector('#dash-team-date')?.addEventListener('change', e => {
+    const c = root.querySelector('#dash-chart-date'); if (c && e.target.value) c.value = e.target.value;
+    drawTeamReport(); drawChart();
+  });
 
   async function load() {
     const from = new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
@@ -100,28 +116,10 @@ export async function renderDashboard(root) {
       ${dayKeys.length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Total (${dayKeys.length} days)</td><td class="num">${tot.u.toLocaleString('en-IN')}</td><td class="num">${tot.w.toFixed(1)} kg</td><td class="num">${inr(tot.v)}</td><td class="num">${inr(tot.g)}</td><td class="num">${tot.w > 0 ? '₹' + (tot.g / tot.w).toFixed(2) : '—'}</td><td class="num">${tot.w > 0 && tot.v > 0 ? '₹' + (tot.v / tot.w).toFixed(2) : '—'}</td></tr></tfoot>` : ''}
     </table></div>`;
 
-    // team performance over the period
-    const byTeam = {};
-    teamDays.forEach(r => { const t = byTeam[r.team] ||= { days: 0, units: 0, weight: 0, wage: 0, value: 0 }; t.days++; t.units += r.units; t.weight += r.weight; t.wage += r.wage; t.value += r.value; });
-    const tpRows = Object.entries(byTeam).sort((a, b) => (a[1].weight > 0 ? a[1].wage / a[1].weight : 1e9) - (b[1].weight > 0 ? b[1].wage / b[1].weight : 1e9))
-      .map(([n, t]) => `<tr><td class="bold">${n}</td><td class="num">${t.days}</td><td class="num">${t.units.toLocaleString('en-IN')}</td><td class="num">${t.weight.toFixed(1)} kg</td><td class="num">${inr(t.wage)}</td><td class="num" style="font-weight:600;">${t.weight > 0 ? '₹' + (t.wage / t.weight).toFixed(2) : '—'}</td><td class="num" style="font-weight:600;">${t.weight > 0 && t.value > 0 ? '₹' + (t.value / t.weight).toFixed(2) : '—'}</td></tr>`).join('')
-      || '<tr><td colspan="7" style="text-align:center;color:var(--ink-dim);padding:20px;">No production in this period</td></tr>';
-    root.querySelector('#dash-teamperf').innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Team</th><th class="num">Days</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Wage</th><th class="num">Labour Cost/kg</th><th class="num">Realisation/kg</th></tr></thead>
-      <tbody>${tpRows}</tbody>
-      ${Object.keys(byTeam).length ? `<tfoot><tr style="font-weight:700;background:var(--bg);"><td>Factory</td><td></td><td class="num">${rangeTot.units.toLocaleString('en-IN')}</td><td class="num">${rangeTot.weight.toFixed(1)} kg</td><td class="num">${inr(rangeTot.wage)}</td><td class="num">${rangeTot.weight > 0 ? '₹' + rangeTot.cpk.toFixed(2) : '—'}</td><td class="num">${rangeTot.rpk > 0 ? '₹' + rangeTot.rpk.toFixed(2) : '—'}</td></tr></tfoot>` : ''}
-    </table></div>`;
-
-    // team-wise cost per kg for each day
-    const tdRows = [...teamDays].sort((a, b) => (a.date === b.date ? a.team.localeCompare(b.team) : b.date.localeCompare(a.date)))
-      .map(r => `<tr><td>${fmtDate(r.date)}</td><td class="bold">${r.team}</td><td class="num">${r.units.toLocaleString('en-IN')}</td><td class="num">${r.weight.toFixed(1)} kg</td><td class="num">${inr(r.wage)}</td><td class="num" style="font-weight:600;">${r.weight > 0 ? '₹' + r.cpk.toFixed(2) : '—'}</td><td class="num" style="font-weight:600;">${r.rpk > 0 ? '₹' + r.rpk.toFixed(2) : '—'}</td></tr>`).join('')
-      || '<tr><td colspan="7" style="text-align:center;color:var(--ink-dim);padding:20px;">No production in this period</td></tr>';
-    root.querySelector('#dash-teamdays').innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Date</th><th>Team</th><th class="num">Units</th><th class="num">Weight</th><th class="num">Wage</th><th class="num">Labour Cost/kg</th><th class="num">Realisation/kg</th></tr></thead>
-      <tbody>${tdRows}</tbody></table></div>`;
+    lastTeamDays = allCost.teamDays;
+    drawTeamReport();
 
     // cost per kg vs weight chart
-    lastTeamDays = allCost.teamDays;
     drawChart();
 
     loadMonthly(supabase).then(r => { const m = root.querySelector('#dash-monthly'); if (m) m.innerHTML = monthlyTableHTML(r, 'data-table'); }).catch(() => {});

@@ -5,7 +5,7 @@ import { requireLogin } from './utils/auth.js';
 import { entryValue } from './utils/value.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from './utils/cost.js';
 import { startAutoClose, closeDays, loadMonthly, monthlyTableHTML } from './utils/dayclose.js';
-import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster } from './utils/roster.js';
+import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster , teamsForDay, membersForDay } from './utils/roster.js';
 
 
 // ── State ──
@@ -84,10 +84,7 @@ async function loadData() {
   teams = tr.data || [];
   products = pr.data || [];
   workers = wr.data || [];
-  let savedTeam = null; try { savedTeam = localStorage.getItem('ml_team'); } catch {}
-  if (teams.length && (!currentTeamId || !teams.some(t => t.id === currentTeamId))) {
-    currentTeamId = (savedTeam && teams.some(t => t.id === savedTeam)) ? savedTeam : teams[0].id;
-  }
+  if (teams.length && !currentTeamId) currentTeamId = teams[0].id;
   await loadTodayLogs();
 }
 
@@ -132,7 +129,8 @@ async function renderDashboard() {
     byProd[n].wt += Number(l.weight || 0);
   });
 
-  const teamCards = allTeams.map(t => {
+  const dayTeamList = teamsForDay(rosterIndex(rosters0), allTeams, SEL, logs);
+  const teamCards = dayTeamList.map(t => {
     const tLogs = logs.filter(l => l.team_id === t.id);
     const tUnits = tLogs.reduce((s, l) => s + Number(l.quantity || 0), 0);
     const tWt = tLogs.reduce((s, l) => s + Number(l.weight || 0), 0);
@@ -151,7 +149,7 @@ async function renderDashboard() {
       <div class="tstat"><span class="l">Labour cost per kg</span><span class="v" style="color:#dc2626">${tCpk}</span></div>
       <div class="tstat"><span class="l">Realisation per kg</span><span class="v" style="color:#16a34a">${tRpk}</span></div>
     </div>`;
-  }).join('') || '<div class="state-msg">No teams yet</div>';
+  }).join('') || '<div class="state-msg">No team made for this day</div>';
 
   const prodRows = Object.entries(byProd).sort((a, b) => b[1].qty - a[1].qty)
     .map(([n, v]) => `<tr><td class="bold">${n}</td><td class="num">${v.qty}</td><td class="num">${v.wt.toFixed(1)} kg</td></tr>`)
@@ -168,7 +166,7 @@ async function renderDashboard() {
     <div class="kpi-grid">
       <div class="kpi-card" style="--ac:#1967D2"><div class="kpi-icon">🏭</div><div class="kpi-label">Units · ${fmtD(SEL)}</div><div class="kpi-value">${totalUnits}</div><div class="kpi-sub">${logs.length} entries</div></div>
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">⚖️</div><div class="kpi-label">Weight (kg)</div><div class="kpi-value">${totalWeight.toFixed(1)}</div><div class="kpi-sub">produced</div></div>
-      <div class="kpi-card" style="--ac:#d97706"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${allTeams.length} total</div></div>
+      <div class="kpi-card" style="--ac:#d97706"><div class="kpi-icon">👷</div><div class="kpi-label">Active Teams</div><div class="kpi-value">${activeTeams}</div><div class="kpi-sub">of ${dayTeamList.length} made this day</div></div>
       <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-icon">📦</div><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">made</div></div>
       <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-icon">🏭</div><div class="kpi-label">Factory Labour Cost per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.cpk > 0 ? '₹' + dayTot.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">labour ₹${Math.round(dayTot.wage).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-icon">💹</div><div class="kpi-label">Factory Realisation per kg · ${fmtD(SEL)}</div><div class="kpi-value">${dayTot.rpk > 0 ? '₹' + dayTot.rpk.toFixed(2) : '—'}</div><div class="kpi-sub">value ₹${Math.round(dayTot.value).toLocaleString('en-IN')} ÷ ${totalWeight.toFixed(1)} kg</div></div>
@@ -231,26 +229,28 @@ async function renderProduction() {
     <div class="section-head" style="margin-top:4px;"><div class="section-title" id="log-date-title">Today's Log</div></div>
     <div id="prod-log"><div class="state-msg">No entries yet</div></div>`;
 
-  // Team tabs
+  // Team tabs: only the teams made for THIS day
+  let prodRosters = await fetchRosterRows(supabase);
+  const dayTeams = teamsForDay(rosterIndex(prodRosters), teams, SEL, todayLogs);
+  if (!dayTeams.some(t => t.id === currentTeamId)) currentTeamId = dayTeams[0]?.id || null;
   const tabsEl = document.getElementById('team-tabs');
-  tabsEl.innerHTML = teams.map(t =>
+  if (!dayTeams.length) tabsEl.innerHTML = `<div class="state-msg" style="padding:10px 0;">No team made for ${fmtD(SEL)} yet.<br/><button class="btn-ghost" style="margin-top:8px;" onclick="showPage('teams')">+ Make a team</button></div>`;
+  else tabsEl.innerHTML = dayTeams.map(t =>
     `<button class="team-tab ${t.id === currentTeamId ? 'active' : ''}" data-id="${t.id}">${t.name || 'Team ' + t.team_number}</button>`
   ).join('');
   tabsEl.querySelectorAll('.team-tab').forEach(btn =>
     btn.addEventListener('click', () => {
       currentTeamId = btn.dataset.id;
-      try { localStorage.setItem('ml_team', currentTeamId); } catch {}
       tabsEl.querySelectorAll('.team-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       updateRosterNote();
     })
   );
 
-  let prodRosters = await fetchRosterRows(supabase);
   function updateRosterNote() {
     const d = SEL;
     const t = teams.find(x => x.id === currentTeamId);
-    const m = t ? membersOn(rosterIndex(prodRosters), t.id, d) : [];
+    const m = t ? membersForDay(rosterIndex(prodRosters), t.id, d, todayLogs.some(l => l.team_id === t.id)) : [];
     const note = document.getElementById('roster-note');
     if (!note) return;
     note.innerHTML = m.length
@@ -299,13 +299,13 @@ async function renderProduction() {
     const productId = sel.value;
     const qty = parseFloat(document.getElementById('prod-qty').value);
     const wt = parseFloat(document.getElementById('prod-wt').value);
-    if (!currentTeamId) { toast('No team selected', 'error'); return; }
+    if (!currentTeamId) { toast('Make a team for this day first (Teams page)', 'error'); return; }
     if (!productId) { toast('Select a product', 'error'); return; }
     if (!qty || qty <= 0) { toast('Enter quantity', 'error'); return; }
     if (!wt || wt <= 0) { toast('Enter weight', 'error'); return; }
     const dateForRoster = SEL;
     const idx = rosterIndex(prodRosters);
-    const dayMembers = membersOn(idx, currentTeamId, dateForRoster);
+    const dayMembers = membersForDay(idx, currentTeamId, dateForRoster, true);
     if (!dayMembers.length) { toast('Set this team’s workers for this date in Teams first', 'error'); return; }
     if (!hasExact(idx, currentTeamId, dateForRoster)) {
       try { await saveRoster(supabase, currentTeamId, dateForRoster, dayMembers); prodRosters = withRoster(prodRosters, currentTeamId, dateForRoster, dayMembers); }
@@ -382,27 +382,48 @@ async function renderTeams() {
   const { data } = await supabase.from('teams').select('*').order('team_number');
   teams = data || [];
   rosterRows = await fetchRosterRows(supabase);
+  await loadLogsForDate(SEL);
 
-  const membersOf = t => membersOn(rosterIndex(rosterRows), t.id, SEL);
+  const dayTeams = () => teamsForDay(rosterIndex(rosterRows), teams, SEL, todayLogs);
+  const membersOf = t => membersForDay(rosterIndex(rosterRows), t.id, SEL, todayLogs.some(l => l.team_id === t.id));
 
   async function saveMembers(t, members) {
     await saveRoster(supabase, t.id, SEL, members);
     rosterRows = withRoster(rosterRows, t.id, SEL, members);
   }
 
+  // Make a team for THIS day: re-use an idle team (keeps Team 1, Team 2… and their history), else create one.
   async function addTeam() {
-    const next = teams.length + 1;
-    const { data: t } = await supabase.from('teams').insert([{
-      team_number: next, name: `Team ${next}`, members: [],
-      supervisor_id: '00000000-0000-0000-0000-000000000000'
-    }]).select().single();
-    if (t) { teams.push(t); renderCards(); toast('Team added'); }
-    else {
-      const { data: t2 } = await supabase.from('teams').insert([{
-        team_number: next, name: `Team ${next}`, members: []
-      }]).select().single();
-      if (t2) { teams.push(t2); renderCards(); toast('Team added'); }
+    const active = new Set(dayTeams().map(t => String(t.id)));
+    const idle = teams.filter(t => !active.has(String(t.id))).sort((a, b) => a.team_number - b.team_number)[0];
+    try {
+      if (idle) { await saveMembers(idle, []); }
+      else {
+        const next = Math.max(0, ...teams.map(t => t.team_number || 0)) + 1;
+        let { data: t, error } = await supabase.from('teams').insert([{ team_number: next, name: `Team ${next}`, members: [], supervisor_id: '00000000-0000-0000-0000-000000000000' }]).select().single();
+        if (error) ({ data: t, error } = await supabase.from('teams').insert([{ team_number: next, name: `Team ${next}`, members: [] }]).select().single());
+        if (error || !t) throw error || new Error('could not create');
+        teams.push(t); await saveMembers(t, []);
+      }
+    } catch (e) { toast('Could not make team: ' + e.message, 'error'); return; }
+    renderCards(); toast('Team made for this day');
+  }
+
+  // Optional: copy the most recent earlier day's teams and workers
+  async function copyPrev() {
+    const idx = rosterIndex(rosterRows);
+    const prevDates = rosterRows.map(r => r.roster_date).filter(d => d < SEL).sort();
+    const prev = prevDates[prevDates.length - 1];
+    if (!prev) return toast('No earlier day to copy', 'error');
+    const here = new Set(dayTeams().map(t => String(t.id)));
+    const taken = new Set(dayTeams().flatMap(membersOf));
+    let n = 0;
+    for (const t of teams) {
+      if (here.has(String(t.id)) || !hasExact(idx, t.id, prev)) continue;
+      const mem = membersForDay(idx, t.id, prev).filter(m => !taken.has(m));
+      try { await saveMembers(t, mem); mem.forEach(m => taken.add(m)); n++; } catch (e) { toast('Copy failed: ' + e.message, 'error'); return; }
     }
+    renderCards(); toast(n ? `Copied ${n} team${n > 1 ? 's' : ''} from ${fmtD(prev)}` : 'Nothing new to copy');
   }
 
   async function renameTeam(id, name) {
@@ -437,9 +458,9 @@ async function renderTeams() {
     el.innerHTML = `
       <div class="team-setup-card" style="border-left:4px solid #1967D2;">
         <div style="font-weight:700;margin-bottom:6px;">📅 Teams for ${fmtD(SEL)}</div>
-        <div style="font-size:12px;color:#667085;">Teams are fixed for <b>${label}</b> only. Changes here never affect other days. A new day starts as a copy of the previous day's teams.</div>
+        <div style="font-size:12px;color:#667085;">Teams are fixed for <b>${label}</b> only. Changes here never affect other days. Every day starts with no teams. Make the teams you need for the day.</div>
       </div>` +
-      teams.map(t => {
+      (dayTeams().map(t => {
         const members = membersOf(t);
         return `
       <div class="team-setup-card">
@@ -465,8 +486,10 @@ async function renderTeams() {
           <button class="btn-add" onclick="addMember('${t.id}',document.getElementById('wsel-${t.id}').value||document.getElementById('wsearch-${t.id}').value)">Add</button>
         </div>
       </div>`;
-      }).join('') +
-      `<button class="btn-ghost" onclick="addTeam()">+ Add Team ${teams.length + 1}</button>`;
+      }).join('') || '<div class="state-msg">No teams for this day yet.</div>') +
+      `<button class="btn-primary" style="margin-top:8px;" onclick="addTeam()">+ Make a new team</button>
+       <button class="btn-ghost" style="margin-top:8px;" onclick="copyPrev()">Copy previous day's teams</button>`;
+    window.copyPrev = copyPrev;
 
     window.renameTeam = renameTeam;
     window.addMember = addMember;
@@ -681,7 +704,7 @@ async function renderInventory() {
       <div class="kpi-card" style="--ac:#1967D2"><div class="kpi-label">Total Units</div><div class="kpi-value">${totalAll}</div><div class="kpi-sub">all time</div></div>
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-label">Total Weight</div><div class="kpi-value">${totalWeight.toFixed(0)} kg</div><div class="kpi-sub">all time</div></div>
       <div class="kpi-card" style="--ac:#d97706"><div class="kpi-label">Products</div><div class="kpi-value">${Object.keys(byProd).length}</div><div class="kpi-sub">types made</div></div>
-      <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-label">Teams</div><div class="kpi-value">${allTeams.length}</div><div class="kpi-sub">active teams</div></div>
+      <div class="kpi-card" style="--ac:#7c3aed"><div class="kpi-label">Teams</div><div class="kpi-value">${teamsForDay(rosterIndex(rosterRows), allTeams, SEL, logs).length}</div><div class="kpi-sub">on ${fmtD(SEL)}</div></div>
       <div class="kpi-card" style="--ac:#dc2626"><div class="kpi-label">Labour Cost per kg</div><div class="kpi-value">${overall.cpk > 0 ? '₹' + overall.cpk.toFixed(2) : '—'}</div><div class="kpi-sub">wage ÷ weight, all time</div></div>
       <div class="kpi-card" style="--ac:#16a34a"><div class="kpi-label">Realisation per kg</div><div class="kpi-value">${overall.rpk > 0 ? '₹' + overall.rpk.toFixed(2) : '—'}</div><div class="kpi-sub">value ÷ weight, all time</div></div>
     </div>

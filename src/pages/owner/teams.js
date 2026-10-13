@@ -1,6 +1,6 @@
 import { fetchTeamsAll } from '../../services/teams.js';
 import { supabase } from '../../services/supabaseClient.js';
-import { istToday, fetchRosterRows, rosterIndex, membersOn } from '../../utils/roster.js';
+import { istToday, fetchRosterRows, rosterIndex, teamsForDay, membersForDay } from '../../utils/roster.js';
 
 let selectedDate = null;
 
@@ -9,9 +9,10 @@ export async function renderTeams(root) {
   if (!selectedDate) selectedDate = TODAY;
   const [teams, rosterRows] = await Promise.all([fetchTeamsAll(), fetchRosterRows(supabase)]);
   const idx = rosterIndex(rosterRows);
+  const lg = (await supabase.from('production_log').select('team_id, production_date').limit(50000)).data || [];
 
   function draw() {
-    const day = teams.map(t => ({ t, members: membersOn(idx, t.id, selectedDate) }));
+    const day = teamsForDay(idx, teams, selectedDate, lg).map(t => ({ t, members: membersForDay(idx, t.id, selectedDate, lg.some(l => l.team_id === t.id && l.production_date === selectedDate)) }));
     const workers = day.reduce((a, x) => a + x.members.length, 0);
     const cards = day.map(({ t, members }) => `
       <div class="card" style="margin-bottom:12px;">
@@ -22,7 +23,7 @@ export async function renderTeams(root) {
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${members.map(m => `<span class="badge badge-blue">${m}</span>`).join('') || '<span style="font-size:12px;color:var(--ink-faint);">No members for this day</span>'}
         </div>
-      </div>`).join('') || '<div class="state-msg">No teams yet</div>';
+      </div>`).join('') || '<div class="state-msg">No team made for this day</div>';
 
     root.innerHTML = `
       <div class="card" style="margin-bottom:16px;">
@@ -31,7 +32,7 @@ export async function renderTeams(root) {
         <div style="font-size:12px;color:var(--ink-dim);margin-top:8px;">Teams are fixed per day. Supervisors set them in the supervisor app.</div>
       </div>
       <div class="kpi-grid" style="grid-template-columns:repeat(2,1fr);margin-bottom:24px;">
-        <div class="kpi-card"><div class="kpi-label">Teams</div><div class="kpi-value">${teams.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Teams this day</div><div class="kpi-value">${day.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Workers on this day</div><div class="kpi-value">${workers}</div></div>
       </div>
       <div class="section-head"><div class="section-title">Teams — ${selectedDate === TODAY ? 'Today' : selectedDate}</div></div>
