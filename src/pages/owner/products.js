@@ -2,10 +2,18 @@ import { fetchProducts, upsertProduct, addProduct } from '../../services/product
 
 export async function renderProducts(root) {
   let products = await fetchProducts();
+  let unsetOnly = false;
 
   function renderList() {
-    const rows = products.map(p => `
-      <tr>
+    const unset = products.filter(p => !(Number(p.selling_price) > 0));
+    if (!unset.length) unsetOnly = false;
+    const ub = document.getElementById('unset-banner');
+    if (ub) {
+      ub.innerHTML = unset.length ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;"><span style="font-size:13px;color:#92400e;"><b>${unset.length} product${unset.length > 1 ? 's' : ''} ha${unset.length > 1 ? 've' : 's'} no price set.</b> Their value counts as ₹0 until you set the price below.</span><button type="button" id="unset-btn" style="border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">${unsetOnly ? 'Show all' : 'Show only these'}</button></div>` : '';
+      document.getElementById('unset-btn')?.addEventListener('click', () => { unsetOnly = !unsetOnly; renderList(); });
+    }
+    const rows = (unsetOnly ? unset : products).map(p => `
+      <tr${Number(p.selling_price) > 0 ? '' : ' style="background:#fffbeb;"'}>
         <td><input type="text" class="name-input" data-id="${p.id}" value="${p.name.replace(/"/g, '&quot;')}" style="width:100%;min-width:150px;border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:13px;font-weight:600;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="selling_price" value="${p.selling_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td><select class="unit-select" data-id="${p.id}" style="border:1px solid var(--border);border-radius:4px;padding:5px 6px;font-size:13px;"><option value="unit" ${p.pricing_unit!=='kg'?'selected':''}>per unit</option><option value="kg" ${p.pricing_unit==='kg'?'selected':''}>per kg</option></select></td>
@@ -82,6 +90,7 @@ export async function renderProducts(root) {
       </div>
       <div id="np-msg" style="font-size:12px;margin-top:8px;"></div>
     </div>
+    <div id="unset-banner"></div>
     <div class="table-wrap">
       <table class="data-table">
         <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
