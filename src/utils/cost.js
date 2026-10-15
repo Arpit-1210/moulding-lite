@@ -81,7 +81,7 @@ export async function loadCostData(supabase) {
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
     fetchSummaries(supabase),
-    supabase.from('products').select('id, selling_price, pricing_unit'),
+    supabase.from('products').select('*'),
   ]);
   const teamDays = buildTeamDays(lr.data || [], tr.data || [], wr.data || [], rosters, summaries, pr0.data || []);
   return { teamDays, overall: sumDays(teamDays) };

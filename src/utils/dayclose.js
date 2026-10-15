@@ -15,7 +15,7 @@ export async function closeDays(supabase, dates) {
       supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').in('production_date', part).limit(50000),
       supabase.from('teams').select('*'),
       supabase.from('workers').select('name, daily_rate'),
-      supabase.from('products').select('id, selling_price, pricing_unit'),
+      supabase.from('products').select('*'),
       fetchRosterRows(supabase),
     ]);
     const logs = lr.data || [];
@@ -67,7 +67,7 @@ export async function loadMonthly(supabase) {
   const [summaries, lr, pr, tr, wr, rosters] = await Promise.all([
     fetchSummaries(supabase),
     supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').eq('production_date', today).limit(5000),
-    supabase.from('products').select('id, selling_price, pricing_unit'),
+    supabase.from('products').select('*'),
     supabase.from('teams').select('*'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),

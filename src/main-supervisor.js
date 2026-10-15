@@ -214,7 +214,8 @@ async function renderProduction() {
         <div class="field"><label>New product name</label><input type="text" id="np-name" autocomplete="off" placeholder="e.g. Ganesh Statue 2ft" /></div>
         <div class="field-row">
           <div class="field"><label>Product price (₹)</label><input type="number" id="np-price" inputmode="decimal" placeholder="0" min="0" step="0.01" /></div>
-          <div class="field"><label>Priced</label><select id="np-unit"><option value="unit">per unit</option><option value="kg">per kg</option></select></div>
+          <div class="field"><label>Priced</label><select id="np-unit"><option value="unit">per unit</option><option value="kg">per kg</option><option value="set">per set</option></select></div>
+          <div class="field" id="np-setwrap" hidden><label>Pieces in 1 set</label><input type="number" id="np-setsize" inputmode="numeric" min="1" step="1" placeholder="e.g. 4" /></div>
         </div>
         <div style="display:flex;gap:8px;"><button type="button" class="btn-primary" id="np-save">Save product</button><button type="button" class="btn-ghost" id="np-cancel">Cancel</button></div>
         <div id="np-msg" style="font-size:12px;margin-top:8px;"></div>
@@ -272,22 +273,25 @@ async function renderProduction() {
   // Add a missing product right here (team stays selected)
   const npBox = document.getElementById('newprod-box');
   document.getElementById('btn-newprod').onclick = () => { npBox.hidden = !npBox.hidden; if (!npBox.hidden) { const n = document.getElementById('np-name'); n.value = document.getElementById('prod-search').value; n.focus(); } };
+  document.getElementById('np-unit').onchange = e => { document.getElementById('np-setwrap').hidden = e.target.value !== 'set'; };
   document.getElementById('np-cancel').onclick = () => { npBox.hidden = true; };
   document.getElementById('np-save').onclick = async () => {
     const msg = document.getElementById('np-msg');
     const name = document.getElementById('np-name').value.trim();
     const price = parseFloat(document.getElementById('np-price').value) || 0;
     const unit = document.getElementById('np-unit').value;
+    const setSz = Math.max(1, Math.round(parseFloat(document.getElementById('np-setsize').value) || 1));
     msg.style.color = '#dc2626';
+    if (unit === 'set' && !(parseFloat(document.getElementById('np-setsize').value) >= 1)) { msg.textContent = 'Enter how many pieces are in one set'; return; }
     if (!name) { msg.textContent = 'Enter product name'; return; }
     if (products.some(p => p.name.toLowerCase() === name.toLowerCase())) { msg.textContent = 'This product already exists. Pick it from the list'; return; }
     const b = document.getElementById('np-save'); b.disabled = true;
-    const { data, error } = await supabase.from('products').insert([{ name, selling_price: price, cost_price: 0, pricing_unit: unit, active: true }]).select().single();
+    const { data, error } = await supabase.from('products').insert([{ name, selling_price: price, cost_price: 0, pricing_unit: unit, ...(unit === 'set' ? { set_size: setSz } : {}), active: true }]).select().single();
     b.disabled = false;
     if (error) { msg.textContent = 'Could not add: ' + error.message; return; }
     products = [...products, data].sort((a, b2) => a.name.localeCompare(b2.name));
     document.getElementById('prod-search').value = ''; fillProducts(); sel.value = data.id;
-    ['np-name', 'np-price'].forEach(i => { document.getElementById(i).value = ''; });
+    ['np-name', 'np-price', 'np-setsize'].forEach(i => { document.getElementById(i).value = ''; });
     npBox.hidden = true; toast(`${name} added ✓`); document.getElementById('prod-qty').focus();
   };
 

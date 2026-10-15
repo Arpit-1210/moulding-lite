@@ -16,10 +16,11 @@ export async function renderProducts(root) {
       <tr${Number(p.selling_price) > 0 ? '' : ' style="background:#fffbeb;"'}>
         <td><input type="text" class="name-input" data-id="${p.id}" value="${p.name.replace(/"/g, '&quot;')}" style="width:100%;min-width:150px;border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:13px;font-weight:600;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="selling_price" value="${p.selling_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
-        <td><select class="unit-select" data-id="${p.id}" style="border:1px solid var(--border);border-radius:4px;padding:5px 6px;font-size:13px;"><option value="unit" ${p.pricing_unit!=='kg'?'selected':''}>per unit</option><option value="kg" ${p.pricing_unit==='kg'?'selected':''}>per kg</option></select></td>
+        <td><select class="unit-select" data-id="${p.id}" style="border:1px solid var(--border);border-radius:4px;padding:5px 6px;font-size:13px;"><option value="unit" ${(p.pricing_unit||'unit')==='unit'?'selected':''}>per unit</option><option value="kg" ${p.pricing_unit==='kg'?'selected':''}>per kg</option><option value="set" ${p.pricing_unit==='set'?'selected':''}>per set</option></select></td>
+        <td class="num">${p.pricing_unit==='set' ? `<input type="number" class="price-input" data-id="${p.id}" data-field="set_size" min="1" step="1" value="${p.set_size||1}" title="Pieces in one set" style="width:64px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"> pcs` : '<span style="color:var(--ink-faint)">—</span>'}</td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="cost_price" value="${p.cost_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td><span class="badge ${p.active?'badge-green':''}"> ${p.active?'Active':'Inactive'}</span></td>
-      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
 
     document.getElementById('products-table-body').innerHTML = rows;
 
@@ -49,9 +50,12 @@ export async function renderProducts(root) {
         const prod = products.find(p => String(p.id) === String(sel.dataset.id));
         if (!prod) return;
         try {
-          await upsertProduct({ id: prod.id, pricing_unit: sel.value });
-          prod.pricing_unit = sel.value;
-          msg.style.color = 'var(--green)'; msg.textContent = `"${prod.name}" is now priced ${sel.value === 'kg' ? 'per kg' : 'per unit'}`;
+          const upd = { id: prod.id, pricing_unit: sel.value };
+          if (sel.value === 'set' && !(Number(prod.set_size) >= 1)) upd.set_size = 1;
+          await upsertProduct(upd);
+          prod.pricing_unit = sel.value; if (upd.set_size) prod.set_size = upd.set_size;
+          msg.style.color = 'var(--green)'; msg.textContent = sel.value === 'set' ? `"${prod.name}" is now priced per set. Enter how many pieces are in one set.` : `"${prod.name}" is now priced ${sel.value === 'kg' ? 'per kg' : 'per unit'}`;
+          renderList();
         } catch (e) { sel.value = prod.pricing_unit || 'unit'; msg.style.color = 'var(--red)'; msg.textContent = 'Could not change: ' + e.message + ' (run product_pricing_unit.sql in Supabase)'; }
       });
     });
@@ -61,7 +65,8 @@ export async function renderProducts(root) {
       input.addEventListener('change', async () => {
         const id = input.dataset.id;
         const field = input.dataset.field;
-        const val = parseFloat(input.value) || 0;
+        let val = parseFloat(input.value) || 0;
+        if (field === 'set_size') val = Math.max(1, Math.round(val) || 1);
         const prod = products.find(p => p.id === id);
         if (prod) {
           prod[field] = val;
@@ -84,7 +89,8 @@ export async function renderProducts(root) {
       <div style="display:flex;flex-wrap:wrap;gap:8px;">
         <input id="np-name" placeholder="Product name" style="flex:2;min-width:160px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
         <input id="np-sell" type="number" placeholder="Selling price ₹" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
-        <select id="np-unit" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;"><option value="unit">Price per unit</option><option value="kg">Price per kg</option></select>
+        <select id="np-unit" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;"><option value="unit">Price per unit</option><option value="kg">Price per kg</option><option value="set">Price per set</option></select>
+        <input id="np-setsize" type="number" min="1" step="1" placeholder="Pieces in one set" style="display:none;flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
         <input id="np-cost" type="number" placeholder="Cost price ₹ (optional)" style="flex:1;min-width:110px;border:1px solid var(--border);border-radius:6px;padding:9px 10px;font-size:14px;">
         <button id="np-add" style="background:var(--primary);color:#fff;border:0;border-radius:6px;padding:9px 18px;font-weight:600;font-size:14px;cursor:pointer;">Add</button>
       </div>
@@ -93,7 +99,7 @@ export async function renderProducts(root) {
     <div id="unset-banner"></div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
+        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Pieces / set</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
         <tbody id="products-table-body"></tbody>
       </table>
     </div>
@@ -101,6 +107,8 @@ export async function renderProducts(root) {
   `;
 
   renderList();
+  const npUnit = document.getElementById('np-unit'), npSet = document.getElementById('np-setsize');
+  npUnit.addEventListener('change', () => { npSet.style.display = npUnit.value === 'set' ? '' : 'none'; });
 
   document.getElementById('np-add').addEventListener('click', async () => {
     const name = document.getElementById('np-name').value.trim();
@@ -113,9 +121,10 @@ export async function renderProducts(root) {
         selling_price: parseFloat(document.getElementById('np-sell').value) || 0,
         cost_price: parseFloat(document.getElementById('np-cost').value) || 0,
         pricing_unit: document.getElementById('np-unit').value,
+        ...(document.getElementById('np-unit').value === 'set' ? { set_size: Math.max(1, Math.round(parseFloat(document.getElementById('np-setsize').value) || 1)) } : {}),
       });
       products = [...products, p].sort((a, b) => a.name.localeCompare(b.name));
-      ['np-name', 'np-sell', 'np-cost'].forEach(i => { document.getElementById(i).value = ''; });
+      ['np-name', 'np-sell', 'np-cost', 'np-setsize'].forEach(i => { document.getElementById(i).value = ''; });
       msg.style.color = 'var(--green)'; msg.textContent = `Added "${name}"`;
       renderList();
     } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = 'Could not add: ' + e.message; }
