@@ -786,7 +786,8 @@ function wireGlobalDate() {
 }
 async function init() {
   try { const d = sessionStorage.getItem('ml_date'); if (d && d <= TODAY) SEL = d; } catch {}
-  await requireLogin();
+  const me = await requireLogin();
+  if (me?.manager) { location.replace('/manager.html'); return; }
   wireGlobalDate();
   startAutoClose(supabase);
   await loadData();

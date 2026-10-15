@@ -59,4 +59,4 @@ async function navigate(route) {
 
 window.addEventListener('hashchange', () => { if (authed) navigate(getRoute()); });
 let authed = false;
-requireLogin().then(() => { authed = true; navigate(getRoute()); startAutoClose(ownerSupabase); });
+requireLogin().then((me) => { if (me?.manager) { location.replace('/manager.html'); return; } authed = true; navigate(getRoute()); startAutoClose(ownerSupabase); });
