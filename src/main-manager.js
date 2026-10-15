@@ -60,7 +60,7 @@ async function draw() {
 const refresh = async () => { try { await draw(); } catch (e) { $('m-body').innerHTML = `<div class="state-msg" style="color:#b91c1c">Error: ${esc(e.message)}</div>`; } };
 
 requireLogin().then(async me => {
-  if (!me.manager && !me.admin) { document.body.innerHTML = '<div class="state-msg" style="padding:40px;text-align:center">Manager access only. <a href="#" id="so">Sign out</a></div>'; $('so').onclick = async () => { await supabase.auth.signOut(); location.reload(); }; return; }
+  if (!me.manager && !me.admin) { document.body.innerHTML = '<div class="state-msg" style="padding:40px;text-align:center">Master access only. <a href="#" id="so">Sign out</a></div>'; $('so').onclick = async () => { await supabase.auth.signOut(); location.reload(); }; return; }
   $('mgr-logout').onclick = async () => { await supabase.auth.signOut(); location.reload(); };
   const d = $('m-date'); d.value = SEL; d.max = TODAY;
   d.onchange = () => { if (!d.value) return; SEL = d.value > TODAY ? TODAY : d.value; d.value = SEL; refresh(); };
