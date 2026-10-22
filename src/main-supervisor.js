@@ -109,7 +109,7 @@ async function renderDashboard() {
   const [lr, pr, tr, wr0, rosters0, sums0] = await Promise.all([
     supabase.from('production_log').select('*').eq('production_date', SEL),
     supabase.from('products').select('*'),
-    supabase.from('teams').select('*'),
+    supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
     fetchSummaries(supabase),
@@ -519,7 +519,7 @@ async function renderLog(days) {
   const [lr, pr, tr] = await Promise.all([
     supabase.from('production_log').select('*').gte('production_date', fromStr).lte('production_date', SEL).order('production_date', { ascending: false }).order('created_at', { ascending: false }),
     supabase.from('products').select('*'),
-    supabase.from('teams').select('*'),
+    supabase.from('teams').select('*').order('team_number'),
   ]);
   const logs = lr.data || [], prods = pr.data || [], allTeams = tr.data || [];
   const prodMap = Object.fromEntries(prods.map(p => [p.id, p]));
@@ -618,7 +618,7 @@ async function renderInventory() {
   const [lr, pr, tr, wr, rosterRows, summaries] = await Promise.all([
     supabase.from('production_log').select('*').order('production_date').limit(50000),
     supabase.from('products').select('*'),
-    supabase.from('teams').select('*'),
+    supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
     fetchSummaries(supabase),

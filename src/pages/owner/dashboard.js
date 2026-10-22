@@ -69,7 +69,7 @@ export async function renderDashboard(root) {
     const [lr, pr, tr, wr, rosters, allCost, summaries] = await Promise.all([
       supabase.from('production_log').select('*').gte('production_date', from).lte('production_date', TODAY).limit(20000),
       supabase.from('products').select('*'),
-      supabase.from('teams').select('*'),
+      supabase.from('teams').select('*').order('team_number'),
       supabase.from('workers').select('name, daily_rate'),
       fetchRosterRows(supabase),
       loadCostData(supabase),

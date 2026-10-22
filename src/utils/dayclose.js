@@ -13,7 +13,7 @@ export async function closeDays(supabase, dates) {
   for (const part of chunk([...new Set(dates)], 30)) {
     const [lr, tr, wr, pr, rosters] = await Promise.all([
       supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').in('production_date', part).limit(50000),
-      supabase.from('teams').select('*'),
+      supabase.from('teams').select('*').order('team_number'),
       supabase.from('workers').select('name, daily_rate'),
       supabase.from('products').select('*'),
       fetchRosterRows(supabase),
@@ -68,7 +68,7 @@ export async function loadMonthly(supabase) {
     fetchSummaries(supabase),
     supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').eq('production_date', today).limit(5000),
     supabase.from('products').select('*'),
-    supabase.from('teams').select('*'),
+    supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
   ]);

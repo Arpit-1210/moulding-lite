@@ -77,7 +77,7 @@ export function costVsWeightChart(teamDays) {
 export async function loadCostData(supabase) {
   const [lr, tr, wr, rosters, summaries, pr0] = await Promise.all([
     supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').limit(50000),
-    supabase.from('teams').select('*'),
+    supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
     fetchSummaries(supabase),

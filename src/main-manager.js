@@ -14,7 +14,7 @@ const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day
 
 async function load() {
   const [tr, pr, wr, rosters, summaries] = await Promise.all([
-    supabase.from('teams').select('*'), supabase.from('products').select('*'),
+    supabase.from('teams').select('*').order('team_number'), supabase.from('products').select('*'),
     supabase.from('workers').select('name, daily_rate'), fetchRosterRows(supabase), fetchSummaries(supabase),
   ]);
   D = { teams: tr.data || [], products: pr.data || [], workers: wr.data || [], rosters, summaries };
