@@ -788,6 +788,7 @@ async function init() {
   try { const d = sessionStorage.getItem('ml_date'); if (d && d <= TODAY) SEL = d; } catch {}
   const me = await requireLogin();
   if (me?.manager) { location.replace('/manager.html'); return; }
+  if (me?.admin) { const ol = document.getElementById('owner-link'); if (ol) ol.style.display = ''; }
   wireGlobalDate();
   startAutoClose(supabase);
   await loadData();
