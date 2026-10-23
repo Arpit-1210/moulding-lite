@@ -53,13 +53,24 @@ function showLogin() {
 }
 
 /** Resolves once the user is signed in (shows the login screen first if needed). */
+// A flaky connection when the app wakes up must not look like "logged out".
+async function currentSession() {
+  for (let i = 0; i < 3; i++) {
+    try { const { data } = await supabase.auth.getSession(); if (data?.session) return data.session; } catch { /* retry */ }
+    if (i < 2) await new Promise(r => setTimeout(r, 1200));
+  }
+  return null;
+}
+
 export async function requireLogin() {
-  const { data } = await supabase.auth.getSession();
-  if (!data?.session) await showLogin();
+  let session = await currentSession();
+  if (!session) { await showLogin(); session = await currentSession(); }
   addLogout();
+  // keep the session alive when the app comes back to the foreground
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) supabase.auth.getSession().catch(() => {}); });
   supabase.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') location.reload(); });
-  const { data: u } = await supabase.auth.getUser();
-  const email = (u?.user?.email || '').toLowerCase();
+  let email = (session?.user?.email || '').toLowerCase();
+  if (!email) { try { const { data: u } = await supabase.auth.getUser(); email = (u?.user?.email || '').toLowerCase(); } catch { /* keep empty */ } }
   const owner2 = email === 'owner@gfpl.com';
   return { email, manager: email === 'master@gfpl.com' || owner2, owner2, admin: email === 'admin@gfpl.com' };
 }
