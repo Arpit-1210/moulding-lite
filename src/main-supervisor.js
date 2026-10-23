@@ -203,12 +203,11 @@ async function renderProduction() {
       <div class="team-tabs" id="team-tabs"></div>
       <div id="roster-note" style="font-size:12px;color:#667085;margin:-2px 0 12px;"></div>
       <div class="field">
-        <label>Search Product</label>
-        <input type="text" id="prod-search" placeholder="Type to search…" autocomplete="off" />
-      </div>
-      <div class="field">
         <label>Product</label>
-        <select id="prod-select"><option value="">Select product…</option></select>
+        <input type="text" id="prod-search" list="prod-list" placeholder="Type to search product…" autocomplete="off" />
+        <datalist id="prod-list"></datalist>
+        <div id="prod-hint" style="font-size:12px;color:#667085;margin-top:4px"></div>
+        <select id="prod-select" hidden><option value="">Select product…</option></select>
       </div>
       <button type="button" class="btn-ghost" id="btn-newprod" style="margin:-4px 0 12px;">+ Product not in list? Add it</button>
       <div id="newprod-box" hidden style="border:1px solid #d0d5dd;border-radius:10px;padding:12px;margin-bottom:12px;background:#f9fafb;">
@@ -267,9 +266,22 @@ async function renderProduction() {
     const list = filter ? products.filter(p => p.name.toLowerCase().includes(filter.toLowerCase())) : products;
     sel.innerHTML = '<option value="">Select product…</option>' +
       list.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+    document.getElementById('prod-list').innerHTML = list.slice(0, 80).map(p => `<option value="${p.name.replace(/"/g, '&quot;')}"></option>`).join('');
   }
   fillProducts();
-  document.getElementById('prod-search').addEventListener('input', e => fillProducts(e.target.value));
+  const searchEl = document.getElementById('prod-search'), hintEl = document.getElementById('prod-hint');
+  function pickFromText() {
+    const q = searchEl.value.trim().toLowerCase();
+    const exact = products.find(p => p.name.toLowerCase() === q);
+    const part = q ? products.filter(p => p.name.toLowerCase().includes(q)) : [];
+    const hit = exact || (part.length === 1 ? part[0] : null);
+    sel.value = hit ? hit.id : '';
+    hintEl.textContent = !q ? '' : hit ? '✓ ' + hit.name : part.length ? part.length + ' matches — keep typing or pick from the list' : 'No product found';
+    hintEl.style.color = hit ? '#16a34a' : '#667085';
+    return hit;
+  }
+  searchEl.addEventListener('input', e => { fillProducts(e.target.value); pickFromText(); });
+  searchEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { const h = pickFromText(); if (h) { e.preventDefault(); document.getElementById('prod-qty').focus(); } } });
 
   // Add a missing product right here (team stays selected)
   const npBox = document.getElementById('newprod-box');
@@ -291,7 +303,7 @@ async function renderProduction() {
     b.disabled = false;
     if (error) { msg.textContent = 'Could not add: ' + error.message; return; }
     products = [...products, data].sort((a, b2) => a.name.localeCompare(b2.name));
-    document.getElementById('prod-search').value = ''; fillProducts(); sel.value = data.id;
+    fillProducts(); sel.value = data.id; document.getElementById('prod-search').value = data.name; pickFromText();
     ['np-name', 'np-price', 'np-setsize'].forEach(i => { document.getElementById(i).value = ''; });
     npBox.hidden = true; toast(`${name} added ✓`); document.getElementById('prod-qty').focus();
   };
@@ -331,7 +343,7 @@ async function renderProduction() {
     document.getElementById('prod-qty').value = '';
     document.getElementById('prod-wt').value = '';
     sel.value = '';
-    document.getElementById('prod-search').value = '';
+    document.getElementById('prod-search').value = ''; fillProducts(); hintEl.textContent = ''; document.getElementById('prod-search').focus();
     fillProducts();
     // Reload log for selected date
     await loadLogsForDate(SEL);
