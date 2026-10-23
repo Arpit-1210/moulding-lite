@@ -204,8 +204,8 @@ async function renderProduction() {
       <div id="roster-note" style="font-size:12px;color:#667085;margin:-2px 0 12px;"></div>
       <div class="field">
         <label>Product</label>
-        <input type="text" id="prod-search" list="prod-list" placeholder="Type to search product…" autocomplete="off" />
-        <datalist id="prod-list"></datalist>
+        <input type="text" id="prod-search" placeholder="Type to search product…" autocomplete="off" />
+        <div id="prod-sugg" style="display:none;border:1px solid #d0d5dd;border-radius:10px;background:#fff;margin-top:4px;max-height:240px;overflow:auto;box-shadow:0 6px 18px rgba(16,24,40,.12)"></div>
         <div id="prod-hint" style="font-size:12px;color:#667085;margin-top:4px"></div>
         <select id="prod-select" hidden><option value="">Select product…</option></select>
       </div>
@@ -266,7 +266,6 @@ async function renderProduction() {
     const list = filter ? products.filter(p => p.name.toLowerCase().includes(filter.toLowerCase())) : products;
     sel.innerHTML = '<option value="">Select product…</option>' +
       list.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-    document.getElementById('prod-list').innerHTML = list.slice(0, 80).map(p => `<option value="${p.name.replace(/"/g, '&quot;')}"></option>`).join('');
   }
   fillProducts();
   const searchEl = document.getElementById('prod-search'), hintEl = document.getElementById('prod-hint');
@@ -280,8 +279,25 @@ async function renderProduction() {
     hintEl.style.color = hit ? '#16a34a' : '#667085';
     return hit;
   }
-  searchEl.addEventListener('input', e => { fillProducts(e.target.value); pickFromText(); });
-  searchEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { const h = pickFromText(); if (h) { e.preventDefault(); document.getElementById('prod-qty').focus(); } } });
+  const suggEl = document.getElementById('prod-sugg');
+  function showSugg() {
+    const q = searchEl.value.trim().toLowerCase();
+    const list = q ? products.filter(p => p.name.toLowerCase().includes(q)) : [];
+    const exact = list.length === 1 && list[0].name.toLowerCase() === q;
+    if (!list.length || exact) { suggEl.style.display = 'none'; return; }
+    list.sort((a, b) => (b.name.toLowerCase().startsWith(q) - a.name.toLowerCase().startsWith(q)));
+    suggEl.innerHTML = list.slice(0, 8).map(p => `<div class="sg" data-id="${p.id}" style="padding:12px 14px;border-bottom:1px solid #f0f2f5;font-size:15px;cursor:pointer">${p.name}</div>`).join('');
+    suggEl.style.display = '';
+  }
+  suggEl.addEventListener('mousedown', e => e.preventDefault());
+  suggEl.addEventListener('click', e => {
+    const d = e.target.closest('.sg'); if (!d) return;
+    const p = products.find(x => String(x.id) === d.dataset.id); if (!p) return;
+    searchEl.value = p.name; pickFromText(); suggEl.style.display = 'none'; document.getElementById('prod-qty').focus();
+  });
+  searchEl.addEventListener('input', e => { fillProducts(e.target.value); pickFromText(); showSugg(); });
+  searchEl.addEventListener('blur', () => setTimeout(() => { suggEl.style.display = 'none'; }, 200));
+  searchEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'ArrowDown') { const h = pickFromText(); if (h) { suggEl.style.display = 'none'; e.preventDefault(); document.getElementById('prod-qty').focus(); } } });
 
   // Add a missing product right here (team stays selected)
   const npBox = document.getElementById('newprod-box');
