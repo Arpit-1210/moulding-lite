@@ -20,7 +20,7 @@ function addLogout() {
   if (!f || f.querySelector('.logout-btn')) return;
   const b = document.createElement('button');
   b.className = 'logout-btn'; b.textContent = 'Logout';
-  b.onclick = async () => { await supabase.auth.signOut(); location.reload(); };
+  b.onclick = async () => { await supabase.auth.signOut({ scope: 'local' }); location.reload(); };
   f.appendChild(b);
 }
 
