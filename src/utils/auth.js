@@ -15,6 +15,10 @@ const STYLE = `
 .logout-btn{margin-top:10px;width:100%;border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:8px;font-size:13px;font-weight:600;color:#667085;cursor:pointer}
 `;
 
+// Remembers why the session ended, shown on the login screen so we can find the real cause.
+function dbg(msg) { try { const a = JSON.parse(localStorage.getItem('auth_dbg') || '[]'); a.push(new Date().toLocaleString('en-IN') + ' ' + msg); localStorage.setItem('auth_dbg', JSON.stringify(a.slice(-4))); } catch { /* ignore */ } }
+function dbgText() { try { return JSON.parse(localStorage.getItem('auth_dbg') || '[]').join(' | '); } catch { return ''; } }
+
 function addLogout() {
   const f = document.querySelector('.sidebar-footer');
   if (!f || f.querySelector('.logout-btn')) return;
@@ -37,6 +41,7 @@ function showLogin() {
         <label>Login ID</label><input id="lg-email" type="email" name="username" autocomplete="username" inputmode="email" placeholder="name@gfpl.com" required />
         <label>Password</label><div class="pw"><input id="lg-pass" type="password" name="password" autocomplete="current-password" required /><button type="button" id="lg-show">Show</button></div>
         <div class="err" id="lg-err"></div>
+        <div id="lg-dbg" style="font-size:10px;color:#98a2b3;margin:-4px 0 10px;word-break:break-word">${dbgText()}</div>
         <button class="go" id="lg-go" type="submit">Sign in</button>
       </form>`;
     document.body.appendChild(ov);
@@ -64,11 +69,11 @@ async function currentSession() {
 
 export async function requireLogin() {
   let session = await currentSession();
-  if (!session) { await showLogin(); session = await currentSession(); }
+  if (!session) { let has = false; try { has = Object.keys(localStorage).some(k => k.startsWith('sb-')); } catch { /* ignore */ } dbg('no session at start; saved login on phone: ' + (has ? 'yes' : 'no')); await showLogin(); session = await currentSession(); }
   addLogout();
   // keep the session alive when the app comes back to the foreground
   document.addEventListener('visibilitychange', () => { if (!document.hidden) supabase.auth.getSession().catch(() => {}); });
-  supabase.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') location.reload(); });
+  supabase.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT' || ev === 'TOKEN_REFRESHED') dbg(ev); if (ev === 'SIGNED_OUT') location.reload(); });
   let email = (session?.user?.email || '').toLowerCase();
   if (!email) { try { const { data: u } = await supabase.auth.getUser(); email = (u?.user?.email || '').toLowerCase(); } catch { /* keep empty */ } }
   const owner2 = email === 'owner@gfpl.com';
