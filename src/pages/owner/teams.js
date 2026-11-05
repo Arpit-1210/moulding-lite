@@ -1,6 +1,7 @@
 import { fetchTeamsAll } from '../../services/teams.js';
 import { supabase } from '../../services/supabaseClient.js';
 import { istToday, fetchRosterRows, rosterIndex, teamsForDay, membersForDay } from '../../utils/roster.js';
+import { fetchAll } from '../../utils/fetchAll.js';
 
 let selectedDate = null;
 
@@ -9,7 +10,7 @@ export async function renderTeams(root) {
   if (!selectedDate) selectedDate = TODAY;
   const [teams, rosterRows] = await Promise.all([fetchTeamsAll(), fetchRosterRows(supabase)]);
   const idx = rosterIndex(rosterRows);
-  const lg = (await supabase.from('production_log').select('team_id, production_date').limit(50000)).data || [];
+  const lg = (await fetchAll(() => supabase.from('production_log').select('team_id, production_date').order('id'))).data || [];
 
   function draw() {
     const day = teamsForDay(idx, teams, selectedDate, lg).map(t => ({ t, members: membersForDay(idx, t.id, selectedDate, lg.some(l => l.team_id === t.id && l.production_date === selectedDate)) }));

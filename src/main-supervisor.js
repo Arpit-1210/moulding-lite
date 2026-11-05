@@ -6,6 +6,7 @@ import { entryValue } from './utils/value.js';
 import { buildTeamDays, sumDays, costVsWeightChart, loadCostData, fetchSummaries, OVERTIME_MULTIPLIER } from './utils/cost.js';
 import { startAutoClose, closeDays, loadMonthly, monthlyTableHTML } from './utils/dayclose.js';
 import { istToday, fetchRosterRows, rosterIndex, membersOn, hasExact, conflictTeam, withRoster, saveRoster , teamsForDay, membersForDay } from './utils/roster.js';
+import { fetchAll } from './utils/fetchAll.js';
 
 
 // ── State ──
@@ -644,7 +645,7 @@ async function renderInventory() {
   const weekStr = weekAgo.toISOString().slice(0, 10);
 
   const [lr, pr, tr, wr, rosterRows, summaries] = await Promise.all([
-    supabase.from('production_log').select('*').order('production_date').limit(50000),
+    fetchAll(() => supabase.from('production_log').select('*').order('production_date').order('id')),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),

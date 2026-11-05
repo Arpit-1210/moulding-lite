@@ -5,6 +5,7 @@
 import { buildTeamDays, sumDays, fetchSummaries, OVERTIME_MULTIPLIER } from './cost.js';
 import { istToday, fetchRosterRows } from './roster.js';
 import { entryValue } from './value.js';
+import { fetchAll } from './fetchAll.js';
 
 const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
 
@@ -12,7 +13,7 @@ const chunk = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i +=
 export async function closeDays(supabase, dates) {
   for (const part of chunk([...new Set(dates)], 30)) {
     const [lr, tr, wr, pr, rosters] = await Promise.all([
-      supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').in('production_date', part).limit(50000),
+      fetchAll(() => supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').in('production_date', part).order('id')),
       supabase.from('teams').select('*').order('team_number'),
       supabase.from('workers').select('name, daily_rate'),
       supabase.from('products').select('*'),
@@ -41,7 +42,7 @@ export async function closeDays(supabase, dates) {
 /** Close every finished day that has production but no summary yet. */
 export async function closePastDays(supabase) {
   const today = istToday();
-  const { data } = await supabase.from('production_log').select('production_date').lt('production_date', today).limit(50000);
+  const { data } = await fetchAll(() => supabase.from('production_log').select('production_date').lt('production_date', today).order('id'));
   const dates = [...new Set((data || []).map(r => r.production_date))];
   if (!dates.length) return;
   const have = new Set((await fetchSummaries(supabase)).map(s => s.summary_date));
@@ -66,7 +67,7 @@ export async function loadMonthly(supabase) {
   const today = istToday();
   const [summaries, lr, pr, tr, wr, rosters] = await Promise.all([
     fetchSummaries(supabase),
-    supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').eq('production_date', today).limit(5000),
+    fetchAll(() => supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').eq('production_date', today).order('id')),
     supabase.from('products').select('*'),
     supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),

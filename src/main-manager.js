@@ -3,6 +3,7 @@ import { requireLogin } from './utils/auth.js';
 import { istToday, fetchRosterRows } from './utils/roster.js';
 import { buildTeamDays, sumDays, fetchSummaries } from './utils/cost.js';
 import { entryValue } from './utils/value.js';
+import { fetchAll } from './utils/fetchAll.js';
 
 const $ = id => document.getElementById(id);
 const TODAY = istToday();
@@ -22,7 +23,7 @@ async function load() {
 
 async function draw() {
   const body = $('m-body');
-  const { data: logs, error } = await supabase.from('production_log').select('*').eq('production_date', SEL).limit(20000);
+  const { data: logs, error } = await fetchAll(() => supabase.from('production_log').select('*').eq('production_date', SEL).order('id'));
   if (error) { body.innerHTML = `<div class="state-msg" style="color:#b91c1c">Error: ${esc(error.message)}</div>`; return; }
   const prod = new Map(D.products.map(p => [p.id, p]));
   const days = buildTeamDays(logs || [], D.teams, D.workers, D.rosters, D.summaries, D.products);

@@ -2,6 +2,7 @@
 // When peak season ends, set this to 1 and every screen recalculates.
 import { rosterIndex, membersOn, fetchRosterRows } from './roster.js';
 import { entryValue } from './value.js';
+import { fetchAll } from './fetchAll.js';
 
 export const OVERTIME_MULTIPLIER = 1.5;
 
@@ -76,7 +77,7 @@ export function costVsWeightChart(teamDays) {
 /** All-time cost data (permanent totals): every log, team, worker and roster. */
 export async function loadCostData(supabase) {
   const [lr, tr, wr, rosters, summaries, pr0] = await Promise.all([
-    supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').limit(50000),
+    fetchAll(() => supabase.from('production_log').select('team_id, product_id, production_date, quantity, weight').order('id')),
     supabase.from('teams').select('*').order('team_number'),
     supabase.from('workers').select('name, daily_rate'),
     fetchRosterRows(supabase),
@@ -88,7 +89,7 @@ export async function loadCostData(supabase) {
 }
 
 export async function fetchSummaries(supabase) {
-  const { data, error } = await supabase.from('daily_summary').select('*').limit(5000);
+  const { data, error } = await fetchAll(() => supabase.from('daily_summary').select('*').order('summary_date'));
   if (error) { console.warn('daily_summary not available:', error.message); return []; }
   return data || [];
 }

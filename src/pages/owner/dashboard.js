@@ -8,6 +8,7 @@ let dashChannel = null;
 let cpkChart = null;
 
 import { istToday } from '../../utils/roster.js';
+import { fetchAll } from '../../utils/fetchAll.js';
 const inr = n => '₹' + Math.round(n || 0).toLocaleString('en-IN');
 const fmtDate = s => { const [y, m, d] = s.split('-'); return `${+d} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1]} ${y}`; };
 
@@ -67,7 +68,7 @@ export async function renderDashboard(root) {
   async function load() {
     const from = new Date(Date.now() + 5.5 * 3600 * 1000 - days * 86400000).toISOString().slice(0, 10);
     const [lr, pr, tr, wr, rosters, allCost, summaries] = await Promise.all([
-      supabase.from('production_log').select('*').gte('production_date', from).lte('production_date', TODAY).limit(20000),
+      fetchAll(() => supabase.from('production_log').select('*').gte('production_date', from).lte('production_date', TODAY).order('id')),
       supabase.from('products').select('*'),
       supabase.from('teams').select('*').order('team_number'),
       supabase.from('workers').select('name, daily_rate'),

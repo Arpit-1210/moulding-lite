@@ -1,3 +1,4 @@
+import { fetchAll } from './fetchAll.js';
 // Daily team rosters. A team's members are fixed for ONE DAY only.
 // effective roster for (team, date) = that date's saved roster, or the most
 // recent earlier one (so a new day starts as a copy of the previous day).
@@ -5,7 +6,7 @@
 export const istToday = () => new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 
 export async function fetchRosterRows(supabase) {
-  const { data, error } = await supabase.from('team_rosters').select('team_id, roster_date, members').limit(50000);
+  const { data, error } = await fetchAll(() => supabase.from('team_rosters').select('team_id, roster_date, members').order('id'));
   if (error) { console.warn('team_rosters not available:', error.message); return []; }
   return data || [];
 }
