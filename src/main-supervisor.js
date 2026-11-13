@@ -278,8 +278,34 @@ async function renderProduction() {
     sel.value = hit ? hit.id : '';
     hintEl.textContent = !q ? '' : hit ? '✓ ' + hit.name : part.length ? part.length + ' matches — keep typing or pick from the list' : 'No product found';
     hintEl.style.color = hit ? '#16a34a' : '#667085';
+    if ((hit ? hit.id : null) !== curPid) { curPid = hit ? hit.id : null; onProductChange(hit); }
+    else if (hit && lastEntry) hintEl.textContent += ' · last: ' + lastEntry.qty + ' pcs = ' + lastEntry.weight + ' kg';
     return hit;
   }
+  // Auto weight from the product's previous entry (editable)
+  let curPid = null, lastEntry = null, wtTouched = false, hintBase = '';
+  const qtyEl = document.getElementById('prod-qty'), wtEl = document.getElementById('prod-wt');
+  const r2 = n => String(Math.round(n * 100) / 100);
+  function fillWeight() {
+    if (!lastEntry || wtTouched) return;
+    const q = parseFloat(qtyEl.value);
+    wtEl.value = q > 0 ? r2(lastEntry.perUnit * q) : r2(lastEntry.weight);
+  }
+  async function onProductChange(hit) {
+    lastEntry = null; wtTouched = false; wtEl.value = '';
+    if (!hit) return;
+    const id = hit.id;
+    const { data } = await supabase.from('production_log').select('quantity, weight')
+      .eq('product_id', id).order('production_date', { ascending: false }).order('created_at', { ascending: false }).limit(1);
+    if (curPid !== id) return; // product changed while loading
+    const l = data && data[0];
+    if (!l || !(Number(l.quantity) > 0) || !(Number(l.weight) > 0)) return;
+    lastEntry = { qty: Number(l.quantity), weight: Number(l.weight), perUnit: Number(l.weight) / Number(l.quantity) };
+    hintEl.textContent = hintEl.textContent + ' · last: ' + lastEntry.qty + ' pcs = ' + lastEntry.weight + ' kg';
+    fillWeight();
+  }
+  qtyEl.addEventListener('input', fillWeight);
+  wtEl.addEventListener('input', () => { wtTouched = true; });
   const suggEl = document.getElementById('prod-sugg');
   function showSugg() {
     const q = searchEl.value.trim().toLowerCase();
@@ -359,7 +385,7 @@ async function renderProduction() {
     todayLogs.unshift(data);
     document.getElementById('prod-qty').value = '';
     document.getElementById('prod-wt').value = '';
-    sel.value = '';
+    sel.value = ''; curPid = null; lastEntry = null; wtTouched = false;
     document.getElementById('prod-search').value = ''; fillProducts(); hintEl.textContent = ''; document.getElementById('prod-search').focus();
     fillProducts();
     // Reload log for selected date
