@@ -1,8 +1,10 @@
+import { supabase } from '../../services/supabaseClient.js';
 import { fetchProducts, upsertProduct, addProduct } from '../../services/products.js';
 
 export async function renderProducts(root) {
   let products = await fetchProducts();
   let unsetOnly = false;
+  let q = '';
 
   function renderList() {
     const unset = products.filter(p => !(Number(p.selling_price) > 0));
@@ -12,7 +14,9 @@ export async function renderProducts(root) {
       ub.innerHTML = unset.length ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;"><span style="font-size:13px;color:#92400e;"><b>${unset.length} product${unset.length > 1 ? 's' : ''} ha${unset.length > 1 ? 've' : 's'} no price set.</b> Their value counts as ₹0 until you set the price below.</span><button type="button" id="unset-btn" style="border:1px solid #d0d5dd;background:#fff;border-radius:8px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer;">${unsetOnly ? 'Show all' : 'Show only these'}</button></div>` : '';
       document.getElementById('unset-btn')?.addEventListener('click', () => { unsetOnly = !unsetOnly; renderList(); });
     }
-    const rows = (unsetOnly ? unset : products).map(p => `
+    const shown = (unsetOnly ? unset : products).filter(p => !q || p.name.toLowerCase().includes(q));
+    const cnt = document.getElementById('prod-count'); if (cnt) cnt.textContent = q ? `${shown.length} of ${products.length} match` : `${products.length} products`;
+    const rows = shown.map(p => `
       <tr${Number(p.selling_price) > 0 ? '' : ' style="background:#fffbeb;"'}>
         <td><input type="text" class="name-input" data-id="${p.id}" value="${p.name.replace(/"/g, '&quot;')}" style="width:100%;min-width:150px;border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:13px;font-weight:600;"></td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="selling_price" value="${p.selling_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
@@ -20,9 +24,30 @@ export async function renderProducts(root) {
         <td class="num">${p.pricing_unit==='set' ? `<input type="number" class="price-input" data-id="${p.id}" data-field="set_size" min="1" step="1" value="${p.set_size||1}" title="Pieces in one set" style="width:64px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"> pcs` : '<span style="color:var(--ink-faint)">—</span>'}</td>
         <td class="num">₹<input type="number" class="price-input" data-id="${p.id}" data-field="cost_price" value="${p.cost_price||''}" placeholder="0" style="width:90px;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:13px;text-align:right;"></td>
         <td><span class="badge ${p.active?'badge-green':''}"> ${p.active?'Active':'Inactive'}</span></td>
-      </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--ink-dim);">No products in catalogue</td></tr>';
+        <td><button type="button" class="del-prod" data-id="${p.id}" title="Delete product" style="border:1px solid #fca5a5;background:#fff;color:#dc2626;border-radius:6px;padding:4px 9px;font-size:14px;cursor:pointer;">🗑</button></td>
+      </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--ink-dim);">' + (q ? 'No product matches “' + q.replace(/</g, '&lt;') + '”' : 'No products in catalogue') + '</td></tr>';
 
     document.getElementById('products-table-body').innerHTML = rows;
+
+    document.querySelectorAll('.del-prod').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const msg = document.getElementById('np-msg');
+        const prod = products.find(p => String(p.id) === String(btn.dataset.id));
+        if (!prod) return;
+        try {
+          const { count, error: ce } = await supabase.from('production_log').select('id', { count: 'exact', head: true }).eq('product_id', prod.id);
+          if (ce) throw ce;
+          if (count > 0) { msg.style.color = 'var(--red)'; msg.textContent = `Cannot delete "${prod.name}": it is used in ${count} production entr${count > 1 ? 'ies' : 'y'}. Rename it instead, or delete those entries first.`; return; }
+          if (!confirm(`Delete "${prod.name}" from the product list?`)) return;
+          const { data, error } = await supabase.from('products').delete().eq('id', prod.id).select();
+          if (error) throw error;
+          if (!data || !data.length) throw new Error('not allowed - run product_delete.sql in Supabase once');
+          products = products.filter(x => x !== prod);
+          msg.style.color = 'var(--green)'; msg.textContent = `Deleted "${prod.name}"`;
+          renderList();
+        } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = 'Could not delete: ' + e.message; }
+      });
+    });
 
     // Auto-save on name change
     document.querySelectorAll('.name-input').forEach(input => {
@@ -97,9 +122,13 @@ export async function renderProducts(root) {
       <div id="np-msg" style="font-size:12px;margin-top:8px;"></div>
     </div>
     <div id="unset-banner"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <input id="prod-q" type="search" placeholder="🔍 Search products…" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:15px;">
+      <span id="prod-count" style="font-size:12px;color:var(--ink-dim);white-space:nowrap;"></span>
+    </div>
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Pieces / set</th><th class="num">Cost Price</th><th>Status</th></tr></thead>
+        <thead><tr><th>Product Name</th><th class="num">Selling Price</th><th>Priced</th><th class="num">Pieces / set</th><th class="num">Cost Price</th><th>Status</th><th></th></tr></thead>
         <tbody id="products-table-body"></tbody>
       </table>
     </div>
@@ -107,6 +136,10 @@ export async function renderProducts(root) {
   `;
 
   renderList();
+  const qEl = document.getElementById('prod-q'), npName = document.getElementById('np-name');
+  qEl.addEventListener('input', () => { q = qEl.value.trim().toLowerCase(); renderList(); });
+  // typing a new product name also filters the list, so you can see if it already exists
+  npName.addEventListener('input', () => { q = npName.value.trim().toLowerCase(); qEl.value = npName.value; renderList(); });
   const npUnit = document.getElementById('np-unit'), npSet = document.getElementById('np-setsize');
   npUnit.addEventListener('change', () => { npSet.style.display = npUnit.value === 'set' ? '' : 'none'; });
 
@@ -125,6 +158,7 @@ export async function renderProducts(root) {
       });
       products = [...products, p].sort((a, b) => a.name.localeCompare(b.name));
       ['np-name', 'np-sell', 'np-cost', 'np-setsize'].forEach(i => { document.getElementById(i).value = ''; });
+      q = ''; qEl.value = '';
       msg.style.color = 'var(--green)'; msg.textContent = `Added "${name}"`;
       renderList();
     } catch (e) { msg.style.color = 'var(--red)'; msg.textContent = 'Could not add: ' + e.message; }
